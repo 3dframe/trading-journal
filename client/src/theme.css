@@ -1,14 +1,14 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:          #0d1117;
-  --sidebar:     #111827;
-  --card:        #161d2e;
-  --border:      #1e293b;
-  --hover:       #1a2540;
+  --bg:          #1e1e25;
+  --sidebar:     #252530;
+  --card:        #2d2d37;
+  --border:      rgba(255,255,255,0.08);
+  --hover:       #363642;
   --active:      rgba(79,106,245,0.12);
   --text:        #e2e8f0;
-  --mute:        #4e6080;
+  --mute:        #6b7280;
   --accent:      #4f6af5;
   --green:       #10b981;
   --red:         #f43f5e;
