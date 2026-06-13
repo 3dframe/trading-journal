@@ -57,6 +57,30 @@ function StatIconCard({ icon, value, label, color, colorBg, onClick }) {
   );
 }
 
+function Tip({ text, children }) {
+  const [show, setShow] = useState(false);
+  return (
+    <span
+      style={{ position: "relative", display: "inline-flex", alignItems: "center" }}
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+    >
+      {children}
+      {show && (
+        <div style={{
+          position: "absolute", bottom: "calc(100% + 7px)", left: "50%", transform: "translateX(-50%)",
+          background: "#1e1e2e", border: "1px solid rgba(255,255,255,0.14)",
+          borderRadius: 7, padding: "7px 11px", fontSize: "0.68rem", color: "#c4c4d4",
+          whiteSpace: "pre-line", zIndex: 300, pointerEvents: "none",
+          boxShadow: "0 6px 18px rgba(0,0,0,0.45)", lineHeight: 1.5,
+        }}>
+          {text}
+        </div>
+      )}
+    </span>
+  );
+}
+
 function MiniDonut({ pct, label, color, onClick }) {
   const safe = isFinite(pct) ? Math.min(100, Math.max(0, pct || 0)) : 0;
   return (
@@ -342,9 +366,11 @@ export default function Dashboard({ user }) {
               <div style={{ fontSize: "2.1rem", fontWeight: 800, letterSpacing: "-1px", color: totalIncome >= 0 ? GREEN : RED }}>
                 {totalIncome >= 0 ? "+" : ""}{fmtAbs(totalIncome)}
               </div>
-              <span style={{ background: pf >= 1 ? "rgba(16,185,129,0.12)" : "rgba(244,63,94,0.12)", color: pf >= 1 ? GREEN : RED, fontSize: "0.7rem", fontWeight: 700, padding: "3px 9px", borderRadius: 12 }}>
-                {pf.toFixed(2)}x PF
-              </span>
+              <Tip text={`Profit Factor: rácio entre ganhos e perdas totais.\nValor acima de 1 significa estratégia lucrativa.`}>
+                <span style={{ background: pf >= 1 ? "rgba(16,185,129,0.12)" : "rgba(244,63,94,0.12)", color: pf >= 1 ? GREEN : RED, fontSize: "0.7rem", fontWeight: 700, padding: "3px 9px", borderRadius: 12, cursor: "help" }}>
+                  {pf.toFixed(2)}x PF
+                </span>
+              </Tip>
             </div>
           </div>
 
