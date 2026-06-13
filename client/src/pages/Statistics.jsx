@@ -126,7 +126,7 @@ export default function Statistics() {
                 <BarChart data={[...bySymbol].sort((a,b)=>a.pl_total-b.pl_total)} layout="vertical" barSize={12}>
                   <XAxis type="number" tick={{fill:MUTE,fontSize:10}} />
                   <YAxis dataKey="simbolo" type="category" tick={{fill:MUTE,fontSize:10}} width={65} />
-                  <Tooltip content={<ChartTooltip formatter={v => [fmt(v),"P&L"]} />} />
+                  <Tooltip content={<ChartTooltip formatter={v => [fmt(v),"P&L"]} />} cursor={{ fill: "transparent" }} />
                   <ReferenceLine x={0} stroke={MUTE} />
                   <Bar dataKey="pl_total">
                     {bySymbol.map((s,i) => <Cell key={i} fill={s.pl_total>=0?GREEN:RED} />)}
@@ -140,7 +140,7 @@ export default function Statistics() {
                 <BarChart data={bySymbol.map(s=>({...s, wr:s.n_wins/s.n_trades*100}))} layout="vertical" barSize={12}>
                   <XAxis type="number" domain={[0,100]} tickFormatter={v=>v+"%"} tick={{fill:MUTE,fontSize:10}} />
                   <YAxis dataKey="simbolo" type="category" tick={{fill:MUTE,fontSize:10}} width={65} />
-                  <Tooltip content={<ChartTooltip formatter={v => [v.toFixed(1)+"%","Win Rate"]} />} />
+                  <Tooltip content={<ChartTooltip formatter={v => [v.toFixed(1)+"%","Win Rate"]} />} cursor={{ fill: "transparent" }} />
                   <ReferenceLine x={50} stroke={MUTE} strokeDasharray="4 2" />
                   <Bar dataKey="wr">
                     {bySymbol.map((s,i)=><Cell key={i} fill={s.n_wins/s.n_trades*100>=50?GREEN:RED} />)}

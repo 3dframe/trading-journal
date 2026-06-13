@@ -448,10 +448,10 @@ export default function Dashboard({ user }) {
   ).sort((a, b) => Math.abs(b[1].ganhos + b[1].perdas) - Math.abs(a[1].ganhos + a[1].perdas));
 
   const catDonutData = [
-    stockSt.n > 0  && { name: "Ações",      value: Math.abs(stockSt.pl),  pl: stockSt.pl,  color: BLUE },
-    cfdSt.n > 0    && { name: "CFDs",        value: Math.abs(cfdSt.pl),    pl: cfdSt.pl,    color: AMBER },
-    optionSt.n > 0 && { name: "Opções",      value: Math.abs(optionSt.pl), pl: optionSt.pl, color: PINK },
-    divLiq !== 0   && { name: "Dividendos",  value: Math.abs(divLiq),      pl: divLiq,      color: GREEN },
+    stockSt.n > 0  && { name: "Ações",      value: Math.abs(stockSt.pl),  pl: stockSt.pl,  color: "#93c5fd" },
+    cfdSt.n > 0    && { name: "CFDs",        value: Math.abs(cfdSt.pl),    pl: cfdSt.pl,    color: "#fde68a" },
+    optionSt.n > 0 && { name: "Opções",      value: Math.abs(optionSt.pl), pl: optionSt.pl, color: "#f9a8d4" },
+    divLiq !== 0   && { name: "Dividendos",  value: Math.abs(divLiq),      pl: divLiq,      color: "#6ee7b7" },
   ].filter(Boolean);
 
   const totalWinsVal   = (stats.avg_win  || 0) * (stats.n_wins   || 0);
@@ -487,14 +487,14 @@ export default function Dashboard({ user }) {
         <button
           onClick={openAllMovimentos}
           style={{
-            background: "rgba(79,106,245,0.12)", border: "1px solid rgba(79,106,245,0.35)",
-            color: "#7c9cff", borderRadius: 8, padding: "7px 14px",
+            background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.35)",
+            color: "#60a5fa", borderRadius: 8, padding: "7px 14px",
             fontSize: "0.78rem", fontWeight: 700, cursor: "pointer",
             display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
             transition: "background .15s",
           }}
-          onMouseEnter={e => e.currentTarget.style.background = "rgba(79,106,245,0.22)"}
-          onMouseLeave={e => e.currentTarget.style.background = "rgba(79,106,245,0.12)"}
+          onMouseEnter={e => e.currentTarget.style.background = "rgba(96,165,250,0.22)"}
+          onMouseLeave={e => e.currentTarget.style.background = "rgba(96,165,250,0.12)"}
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
             <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
@@ -503,7 +503,7 @@ export default function Dashboard({ user }) {
           Ver Movimentos
         </button>
         <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#4f6af5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
             style={{ position: "absolute", left: 10, pointerEvents: "none", flexShrink: 0 }}>
             <rect x="3" y="4" width="18" height="18" rx="2"/>
             <line x1="16" y1="2" x2="16" y2="6"/>
@@ -537,15 +537,15 @@ export default function Dashboard({ user }) {
             {/* Título */}
             <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "var(--text)", marginBottom: 2 }}>Total Acumulado</div>
             <div style={{ fontSize: "0.72rem", color: MUTE, marginBottom: 16 }}>
-              {new Date().toLocaleDateString("pt-PT", { day: "numeric", month: "long", year: "numeric" })}
+              Ano {ano}
             </div>
 
             {/* P&L total + PF */}
-            <div style={{ marginBottom: 18 }}>
-              <div style={{ fontSize: "1.55rem", fontWeight: 800, letterSpacing: "-0.5px", color: totalIncome >= 0 ? GREEN : RED, marginBottom: 7 }}>
+            <div style={{ marginBottom: 18, display: "flex", alignItems: "flex-end", gap: 10 }}>
+              <div style={{ fontSize: "1.55rem", fontWeight: 800, letterSpacing: "-0.5px", color: totalIncome >= 0 ? GREEN : RED }}>
                 {fmtAbs(totalIncome)}
               </div>
-              <span style={{ background: pf >= 1 ? "rgba(16,185,129,0.12)" : "rgba(244,63,94,0.12)", color: pf >= 1 ? GREEN : RED, fontSize: "0.7rem", fontWeight: 700, padding: "3px 9px", borderRadius: 12, display: "inline-block" }}>
+              <span style={{ color: totalIncome >= 0 ? GREEN : RED, fontSize: "0.72rem", fontWeight: 700, opacity: 0.75 }}>
                 {pf.toFixed(2)}x PF
               </span>
             </div>
@@ -581,13 +581,23 @@ export default function Dashboard({ user }) {
             <div style={{ flex: 1 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={weekly} barSize={10}>
+                  <defs>
+                    <linearGradient id="weekGreen" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#10b981" stopOpacity={0.9} />
+                      <stop offset="100%" stopColor="#10b981" stopOpacity={0.15} />
+                    </linearGradient>
+                    <linearGradient id="weekRed" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#f43f5e" stopOpacity={0.15} />
+                      <stop offset="100%" stopColor="#f43f5e" stopOpacity={0.9} />
+                    </linearGradient>
+                  </defs>
                   <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
                   <XAxis dataKey="semana" tick={{ fill: MUTE, fontSize: 9 }} tickFormatter={s => s?.slice(5)} interval="preserveStartEnd" axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: MUTE, fontSize: 9 }} tickFormatter={v => `€${v}`} width={46} axisLine={false} tickLine={false} />
                   <Tooltip content={<WeekTooltip />} cursor={{ fill: "transparent" }} />
                   <ReferenceLine y={0} stroke="rgba(255,255,255,0.18)" />
                   <Bar dataKey="pl" radius={[3,3,0,0]}>
-                    {weekly.map((w, i) => <Cell key={i} fill={w.pl >= 0 ? GREEN : RED} />)}
+                    {weekly.map((w, i) => <Cell key={i} fill={w.pl >= 0 ? "url(#weekGreen)" : "url(#weekRed)"} />)}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
@@ -598,8 +608,8 @@ export default function Dashboard({ user }) {
         {/* Right: Win/Loss */}
         <div className="card" style={{ padding: 20, display: "flex", flexDirection: "column" }}>
           <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: "0.64rem", fontWeight: 700, color: "var(--text)", textTransform: "uppercase", letterSpacing: ".1em" }}>Win / Loss</div>
-            <div style={{ fontSize: "0.7rem", color: MUTE, marginTop: 2 }}>Ano {ano}</div>
+            <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "var(--text)" }}>Win / Loss</div>
+            <div style={{ fontSize: "0.72rem", color: MUTE, marginTop: 2 }}>Ano {ano}</div>
           </div>
 
           <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
@@ -655,9 +665,14 @@ export default function Dashboard({ user }) {
                   <PieChart>
                     <Pie data={[{ v: stats.n_wins }, { v: stats.n_losses }]} dataKey="v" innerRadius={44} outerRadius={64} paddingAngle={3}
                       onClick={(_, index) => index === 0 ? openWins() : openLosses()} style={{ cursor: "pointer" }}>
-                      <Cell fill={GREEN} /><Cell fill={RED} />
+                      <Cell fill="#34d399" /><Cell fill="#fb7185" />
                     </Pie>
-                    <Tooltip formatter={(v, n, p) => [v + " trades", p.dataIndex === 0 ? "Wins" : "Losses"]} />
+                    <Tooltip
+                      formatter={(v, n, p) => [v + " trades", p.dataIndex === 0 ? "Wins" : "Losses"]}
+                      contentStyle={{ background: "#1e1e2e", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, fontSize: 12 }}
+                      itemStyle={{ color: "#fff" }}
+                      wrapperStyle={{ zIndex: 9999 }}
+                    />
                   </PieChart>
                 </ResponsiveContainer>
                 <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", textAlign: "center", pointerEvents: "none" }}>
@@ -719,12 +734,21 @@ export default function Dashboard({ user }) {
             {/* Chart */}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: "0.75rem", fontWeight: 800, color: "var(--text)", textTransform: "uppercase", letterSpacing: ".1em" }}>
-                  Curva de Equity
-                </div>
+                <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "var(--text)", marginBottom: 2 }}>Curva de Equity</div>
+                <div style={{ fontSize: "0.72rem", color: MUTE }}>Ano {ano}</div>
               </div>
               <ResponsiveContainer width="100%" height={230}>
                 <BarChart data={eqChartData} barSize={eqBarW} barGap={2} barCategoryGap="40%">
+                  <defs>
+                    <linearGradient id="eqAmber" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#fbbf24" stopOpacity={0.9} />
+                      <stop offset="100%" stopColor="#fbbf24" stopOpacity={0.15} />
+                    </linearGradient>
+                    <linearGradient id="eqWhite" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#ffffff" stopOpacity={0.55} />
+                      <stop offset="100%" stopColor="#ffffff" stopOpacity={0.08} />
+                    </linearGradient>
+                  </defs>
                   <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
                   <XAxis dataKey="label" tick={{ fill: MUTE, fontSize: 9 }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: MUTE, fontSize: 9 }} tickFormatter={v => `€${v.toFixed(0)}`} width={56} axisLine={false} tickLine={false} />
@@ -735,8 +759,8 @@ export default function Dashboard({ user }) {
                     cursor={{ fill: "transparent" }}
                   />
                   <ReferenceLine y={0} stroke="rgba(255,255,255,0.22)" />
-                  {showIncome  && <Bar dataKey="income"  name="income"  fill={AMBER}                 radius={[3,3,0,0]} />}
-                  {showExpense && <Bar dataKey="expense" name="expense" fill="rgba(255,255,255,0.6)" radius={[3,3,0,0]} />}
+                  {showIncome  && <Bar dataKey="income"  name="income"  fill="url(#eqAmber)" radius={[3,3,0,0]} />}
+                  {showExpense && <Bar dataKey="expense" name="expense" fill="url(#eqWhite)" radius={[3,3,0,0]} />}
                 </BarChart>
               </ResponsiveContainer>
               <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed rgba(255,255,255,0.08)", fontSize: "0.72rem", color: MUTE, lineHeight: 1.7 }}>
@@ -840,8 +864,8 @@ export default function Dashboard({ user }) {
           {/* P&L by category donut */}
           <div className="card" style={{ padding: 20 }}>
           <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: "0.64rem", fontWeight: 700, color: "var(--text)", textTransform: "uppercase", letterSpacing: ".1em" }}>Lucro / Perda</div>
-            <div style={{ fontSize: "0.7rem", color: MUTE, marginTop: 2 }}>Ano {ano}</div>
+            <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "var(--text)", marginBottom: 2 }}>Lucro / Perda</div>
+            <div style={{ fontSize: "0.72rem", color: MUTE, marginTop: 2 }}>Ano {ano}</div>
           </div>
           {catDonutData.length > 0 ? (() => {
             const totalAbs = catDonutData.reduce((s, d) => s + d.value, 0);
@@ -854,7 +878,12 @@ export default function Dashboard({ user }) {
                     <Pie data={catDonutData} dataKey="value" innerRadius={42} outerRadius={62} paddingAngle={3}>
                       {catDonutData.map((d, i) => <Cell key={i} fill={d.color} />)}
                     </Pie>
-                    <Tooltip formatter={(v, n, { payload }) => [fmt(payload.pl), payload.name]} />
+                    <Tooltip
+                      formatter={(v, n, { payload }) => [fmt(payload.pl), payload.name]}
+                      contentStyle={{ background: "#1e1e2e", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, fontSize: 12 }}
+                      itemStyle={{ color: "#fff" }}
+                      wrapperStyle={{ zIndex: 9999 }}
+                    />
                   </PieChart>
                 </ResponsiveContainer>
                 <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", textAlign: "center", pointerEvents: "none" }}>
@@ -912,17 +941,27 @@ export default function Dashboard({ user }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
         <div className="card" style={{ padding: 20 }}>
           <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: "0.64rem", fontWeight: 700, color: "var(--text)", textTransform: "uppercase", letterSpacing: ".1em" }}>P&L por Símbolo (Top 10)</div>
-            <div style={{ fontSize: "0.7rem", color: MUTE, marginTop: 2 }}>Ano {ano}</div>
+            <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "var(--text)", marginBottom: 2 }}>P&L por Símbolo (Top 10)</div>
+            <div style={{ fontSize: "0.72rem", color: MUTE, marginTop: 2 }}>Ano {ano}</div>
           </div>
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={top10sym} layout="vertical" barSize={12}>
+              <defs>
+                <linearGradient id="symGreen" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stopColor="#10b981" stopOpacity={0.2} />
+                  <stop offset="100%" stopColor="#10b981" stopOpacity={0.9} />
+                </linearGradient>
+                <linearGradient id="symRed" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stopColor="#f43f5e" stopOpacity={0.9} />
+                  <stop offset="100%" stopColor="#f43f5e" stopOpacity={0.2} />
+                </linearGradient>
+              </defs>
               <XAxis type="number" tick={{ fill: MUTE, fontSize: 9 }} axisLine={false} tickLine={false} />
               <YAxis dataKey="simbolo" type="category" tick={{ fill: MUTE, fontSize: 9 }} width={58} axisLine={false} tickLine={false} />
               <Tooltip content={<TooltipDark />} cursor={{ fill: "rgba(255,255,255,0.04)" }} />
               <ReferenceLine x={0} stroke="rgba(255,255,255,0.1)" />
               <Bar dataKey="pl_total" style={{ cursor: "pointer" }} onClick={d => openSymbolHistory(d.simbolo, { tradesOnly: true })}>
-                {top10sym.map((s, i) => <Cell key={i} fill={s.pl_total >= 0 ? GREEN : RED} />)}
+                {top10sym.map((s, i) => <Cell key={i} fill={s.pl_total >= 0 ? "url(#symGreen)" : "url(#symRed)"} />)}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
@@ -933,13 +972,13 @@ export default function Dashboard({ user }) {
             <button
               onClick={openAllMovimentos}
               style={{
-                flexShrink: 0, background: "rgba(79,106,245,0.12)", border: "1px solid rgba(79,106,245,0.3)",
+                flexShrink: 0, background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.3)",
                 borderRadius: 8, padding: "6px 14px", cursor: "pointer",
                 display: "flex", flexDirection: "column", alignItems: "center", gap: 1,
                 transition: "background .15s",
               }}
-              onMouseEnter={e => e.currentTarget.style.background = "rgba(79,106,245,0.22)"}
-              onMouseLeave={e => e.currentTarget.style.background = "rgba(79,106,245,0.12)"}
+              onMouseEnter={e => e.currentTarget.style.background = "rgba(96,165,250,0.22)"}
+              onMouseLeave={e => e.currentTarget.style.background = "rgba(96,165,250,0.12)"}
             >
               <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#fff", lineHeight: 1.2 }}>Ver</span>
               <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#fff", lineHeight: 1.2 }}>Movimentos</span>
@@ -948,7 +987,7 @@ export default function Dashboard({ user }) {
         </div>
         {/* Categorias */}
         <div className="card" style={{ padding: 24 }}>
-          <div style={{ fontSize: "0.64rem", fontWeight: 700, color: "var(--text)", textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 4 }}>Categorias</div>
+          <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "var(--text)", marginBottom: 2 }}>Categorias</div>
           <div style={{ fontSize: "0.72rem", color: MUTE, marginBottom: 22 }}>% do P&L total por categoria</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, justifyItems: "center" }}>
             <MiniDonut pct={catPct(stockSt.pl)}  label="Ações"      color={BLUE}  onClick={() => openCategory("STOCK",  "Ações",  "📈")} value={stockSt.pl} />
@@ -968,13 +1007,13 @@ export default function Dashboard({ user }) {
             <button
               onClick={openAllMovimentos}
               style={{
-                flexShrink: 0, background: "rgba(79,106,245,0.12)", border: "1px solid rgba(79,106,245,0.3)",
+                flexShrink: 0, background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.3)",
                 borderRadius: 8, padding: "6px 14px", cursor: "pointer",
                 display: "flex", flexDirection: "column", alignItems: "center", gap: 1,
                 transition: "background .15s",
               }}
-              onMouseEnter={e => e.currentTarget.style.background = "rgba(79,106,245,0.22)"}
-              onMouseLeave={e => e.currentTarget.style.background = "rgba(79,106,245,0.12)"}
+              onMouseEnter={e => e.currentTarget.style.background = "rgba(96,165,250,0.22)"}
+              onMouseLeave={e => e.currentTarget.style.background = "rgba(96,165,250,0.12)"}
             >
               <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#fff", lineHeight: 1.2 }}>Ver</span>
               <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#fff", lineHeight: 1.2 }}>Movimentos</span>
@@ -989,13 +1028,13 @@ export default function Dashboard({ user }) {
         <button
           onClick={openAllTrades}
           style={{
-            background: "rgba(79,106,245,0.12)", border: "1px solid rgba(79,106,245,0.3)",
+            background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.3)",
             borderRadius: 8, padding: "6px 14px", cursor: "pointer",
             fontSize: "0.72rem", fontWeight: 700, color: "#fff",
             transition: "background .15s",
           }}
-          onMouseEnter={e => e.currentTarget.style.background = "rgba(79,106,245,0.22)"}
-          onMouseLeave={e => e.currentTarget.style.background = "rgba(79,106,245,0.12)"}
+          onMouseEnter={e => e.currentTarget.style.background = "rgba(96,165,250,0.22)"}
+          onMouseLeave={e => e.currentTarget.style.background = "rgba(96,165,250,0.12)"}
         >
           Ver todas ({stats.n_trades})
         </button>
