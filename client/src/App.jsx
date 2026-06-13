@@ -1,10 +1,15 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import axios from "axios";
 import Dashboard   from "./pages/Dashboard.jsx";
 import TradeLog    from "./pages/TradeLog.jsx";
 import Calendar    from "./pages/Calendar.jsx";
 import Statistics  from "./pages/Statistics.jsx";
 import Import      from "./pages/Import.jsx";
 import IRS         from "./pages/IRS.jsx";
+import Login       from "./pages/Login.jsx";
+import Admin       from "./pages/Admin.jsx";
+
+axios.defaults.withCredentials = true;
 
 /* ── Inline SVG icons ────────────────────────────────────── */
 const GridIcon = () => (
@@ -81,10 +86,13 @@ const SunIcon = () => (
     <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
   </svg>
 );
-const BellIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-    <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-    <path d="M13.73 21a2 2 0 01-3.46 0"/>
+
+const AdminIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
+    <circle cx="9" cy="7" r="4"/>
+    <path d="M23 21v-2a4 4 0 00-3-3.87"/>
+    <path d="M16 3.13a4 4 0 010 7.75"/>
   </svg>
 );
 
@@ -103,6 +111,31 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [hovered, setHovered]     = useState(false);
   const [darkMode, setDarkMode]   = useState(true);
+  const [user, setUser]           = useState(null);
+  const [isAdmin, setIsAdmin]     = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [cookiesOk, setCookiesOk] = useState(() => localStorage.getItem("cookies_accepted") === "1");
+
+  useEffect(() => {
+    axios.get("/api/auth/me")
+      .then(r => { setUser(r.data.username); setIsAdmin(!!r.data.isAdmin); })
+      .catch(() => { setUser(null); setIsAdmin(false); })
+      .finally(() => setAuthChecked(true));
+  }, []);
+
+  const logout = async () => {
+    await axios.post("/api/auth/logout");
+    setUser(null);
+    setIsAdmin(false);
+  };
+
+  const acceptCookies = () => {
+    localStorage.setItem("cookies_accepted", "1");
+    setCookiesOk(true);
+  };
+
+  if (!authChecked) return null;
+  if (!user) return <Login onLogin={d => { setUser(d.username); setIsAdmin(!!d.isAdmin); }} />;
 
   const toggleTheme = () => {
     const next = !darkMode;
@@ -110,16 +143,21 @@ export default function App() {
     document.documentElement.setAttribute("data-theme", next ? "dark" : "light");
   };
 
-  const currentPage = PAGES.find(p => p.id === page);
+  const navPages = isAdmin
+    ? [...PAGES, { id: "admin", label: "Administração", icon: <AdminIcon /> }]
+    : PAGES;
+
+  const currentPage = navPages.find(p => p.id === page);
 
   const renderPage = () => {
     switch (page) {
-      case "dashboard":  return <Dashboard />;
+      case "dashboard":  return <Dashboard user={user} />;
       case "tradelog":   return <TradeLog />;
       case "calendar":   return <Calendar />;
       case "statistics": return <Statistics />;
       case "import":     return <Import />;
       case "irs":        return <IRS />;
+      case "admin":      return isAdmin ? <Admin /> : <Dashboard />;
       default:           return <Dashboard />;
     }
   };
@@ -146,7 +184,11 @@ export default function App() {
       >
         {/* Logo */}
         <div className="sidebar-logo">
-          <div className="sidebar-logo-icon">PC</div>
+          <div className="sidebar-logo-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+            </svg>
+          </div>
           <div className="sidebar-text">
             <div className="sidebar-logo-title">Diário de Trading</div>
             <div className="sidebar-logo-sub">Gestão e IRS</div>
@@ -157,7 +199,7 @@ export default function App() {
         <nav className="sidebar-nav">
           <span className="nav-section-label sidebar-text">MENU</span>
 
-          {PAGES.map(p => (
+          {navPages.map(p => (
             <button
               key={p.id}
               className={`nav-item ${page === p.id ? "active" : ""}`}
@@ -177,6 +219,12 @@ export default function App() {
             Dados guardados localmente<br />
             Sem sincronização na nuvem
           </div>
+        </div>
+
+        {/* Copyright */}
+        <div className="sidebar-copyright sidebar-text">
+          © {new Date().getFullYear()} Diário de Trading<br />
+          Todos os direitos reservados
         </div>
       </aside>
 
@@ -201,8 +249,18 @@ export default function App() {
             <div className="topbar-icon-btn" onClick={toggleTheme} style={{ cursor: "pointer" }}>
               {darkMode ? <MoonIcon /> : <SunIcon />}
             </div>
-            <div className="topbar-icon-btn"><BellIcon /></div>
-            <div className="topbar-avatar">PC</div>
+            <div className="topbar-avatar" title={user}>{user?.slice(0,2).toUpperCase()}</div>
+            <button
+              onClick={logout}
+              className="topbar-logout-btn"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                <polyline points="16 17 21 12 16 7"/>
+                <line x1="21" y1="12" x2="9" y2="12"/>
+              </svg>
+              Sair
+            </button>
           </div>
         </header>
 
@@ -211,6 +269,26 @@ export default function App() {
           {renderPage()}
         </main>
       </div>
+
+      {/* Cookie consent banner */}
+      {!cookiesOk && (
+        <div className="cookie-banner">
+          <div className="cookie-banner-inner">
+            <div className="cookie-banner-text">
+              <span className="cookie-banner-title">🍪 Este site utiliza cookies</span>
+              <span className="cookie-banner-desc">
+                Utilizamos cookies essenciais para manter a tua sessão ativa e guardar as tuas preferências (tema, etc.).
+                Não partilhamos dados com terceiros.
+              </span>
+            </div>
+            <div className="cookie-banner-actions">
+              <button className="btn btn-primary cookie-btn-accept" onClick={acceptCookies}>
+                Aceitar e continuar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

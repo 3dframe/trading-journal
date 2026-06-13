@@ -4,27 +4,22 @@ const { getDb } = require("../db");
 
 const yearParam = (v) => (v && /^\d{4}$/.test(String(v)) ? String(v) : null);
 
-// GET /api/trades?ano=2025&corretora=XTB&categoria=STOCK
+// GET /api/trades
 router.get("/", (req, res) => {
   try {
-    const db = getDb();
+    const db = getDb(req.session.user.username);
     const { ano, corretora, categoria, simbolo } = req.query;
 
     let sql = "SELECT * FROM trades WHERE 1=1";
     const params = [];
 
-    if (ano) {
-      sql += " AND strftime('%Y', data_fecho) = ?";
-      params.push(String(ano));
-    }
+    if (ano)       { sql += " AND strftime('%Y', data_fecho) = ?"; params.push(String(ano)); }
     if (corretora) { sql += " AND corretora = ?"; params.push(corretora); }
     if (categoria) { sql += " AND categoria = ?"; params.push(categoria); }
     if (simbolo)   { sql += " AND simbolo LIKE ?"; params.push(`%${simbolo}%`); }
 
     sql += " ORDER BY data_fecho DESC";
-
-    const rows = db.prepare(sql).all(...params);
-    res.json(rows);
+    res.json(db.prepare(sql).all(...params));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -33,7 +28,7 @@ router.get("/", (req, res) => {
 // GET /api/trades/anos
 router.get("/anos", (req, res) => {
   try {
-    const db = getDb();
+    const db = getDb(req.session.user.username);
     const rows = db.prepare(
       "SELECT DISTINCT strftime('%Y', data_fecho) as ano FROM trades WHERE data_fecho IS NOT NULL ORDER BY ano DESC"
     ).all();
@@ -43,10 +38,10 @@ router.get("/anos", (req, res) => {
   }
 });
 
-// GET /api/trades/stats?ano=2025
+// GET /api/trades/stats
 router.get("/stats", (req, res) => {
   try {
-    const db = getDb();
+    const db = getDb(req.session.user.username);
     const aYear  = yearParam(req.query.ano);
     const where  = aYear ? "WHERE strftime('%Y', data_fecho) = ?" : "";
     const params = aYear ? [aYear] : [];
@@ -65,8 +60,7 @@ router.get("/stats", (req, res) => {
     FROM trades ${where}`).get(...params);
 
     const byDay = db.prepare(`SELECT
-      date(data_fecho) as dia,
-      SUM(pl_eur) as pl
+      date(data_fecho) as dia, SUM(pl_eur) as pl
     FROM trades ${where}
     GROUP BY dia ORDER BY pl DESC`).all(...params);
 
@@ -75,9 +69,8 @@ router.get("/stats", (req, res) => {
     const worst_day      = byDay[byDay.length - 1]?.pl  ?? 0;
     const worst_day_date = byDay[byDay.length - 1]?.dia ?? null;
 
-    const win_rate = total.n_trades > 0 ? (total.n_wins / total.n_trades) * 100 : 0;
-    const profit_factor = total.gross_loss !== 0
-      ? Math.abs(total.gross_win / total.gross_loss) : 0;
+    const win_rate      = total.n_trades > 0 ? (total.n_wins / total.n_trades) * 100 : 0;
+    const profit_factor = total.gross_loss !== 0 ? Math.abs(total.gross_win / total.gross_loss) : 0;
 
     res.json({ ...total, win_rate, profit_factor, best_day, best_day_date, worst_day, worst_day_date });
   } catch (e) {
@@ -85,85 +78,69 @@ router.get("/stats", (req, res) => {
   }
 });
 
-// GET /api/trades/equity?ano=2025
+// GET /api/trades/equity
 router.get("/equity", (req, res) => {
   try {
-    const db = getDb();
+    const db = getDb(req.session.user.username);
     const aYear  = yearParam(req.query.ano);
     const where  = aYear ? "WHERE strftime('%Y', data_fecho) = ?" : "";
     const params = aYear ? [aYear] : [];
 
     const rows = db.prepare(`SELECT date(data_fecho) as dia, SUM(pl_eur) as pl
-      FROM trades ${where}
-      GROUP BY dia ORDER BY dia ASC`).all(...params);
+      FROM trades ${where} GROUP BY dia ORDER BY dia ASC`).all(...params);
 
     let cumul = 0;
-    const equity = rows.map(r => {
+    res.json(rows.map(r => {
       cumul += r.pl;
       return { dia: r.dia, equity: Math.round(cumul * 100) / 100 };
-    });
-
-    res.json(equity);
+    }));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// GET /api/trades/by-week?ano=2025
+// GET /api/trades/by-week
 router.get("/by-week", (req, res) => {
   try {
-    const db = getDb();
+    const db = getDb(req.session.user.username);
     const aYear  = yearParam(req.query.ano);
     const where  = aYear ? "WHERE strftime('%Y', data_fecho) = ?" : "";
     const params = aYear ? [aYear] : [];
 
-    const rows = db.prepare(`SELECT
-      strftime('%Y-W%W', data_fecho) as semana,
-      SUM(pl_eur) as pl
-    FROM trades ${where}
-    GROUP BY semana ORDER BY semana ASC`).all(...params);
-
-    res.json(rows);
+    res.json(db.prepare(`SELECT
+      strftime('%Y-W%W', data_fecho) as semana, SUM(pl_eur) as pl
+    FROM trades ${where} GROUP BY semana ORDER BY semana ASC`).all(...params));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// GET /api/trades/by-symbol?ano=2025
+// GET /api/trades/by-symbol
 router.get("/by-symbol", (req, res) => {
   try {
-    const db = getDb();
+    const db = getDb(req.session.user.username);
     const aYear  = yearParam(req.query.ano);
     const where  = aYear ? "WHERE strftime('%Y', data_fecho) = ?" : "";
     const params = aYear ? [aYear] : [];
 
-    const rows = db.prepare(`SELECT
-      simbolo,
-      COUNT(*) as n_trades,
-      SUM(pl_eur) as pl_total,
-      SUM(CASE WHEN pl_eur > 0 THEN 1 ELSE 0 END) as n_wins,
-      AVG(pl_eur) as avg_pl
-    FROM trades ${where}
-    GROUP BY simbolo ORDER BY pl_total DESC`).all(...params);
-
-    res.json(rows);
+    res.json(db.prepare(`SELECT
+      simbolo, COUNT(*) as n_trades, SUM(pl_eur) as pl_total,
+      SUM(CASE WHEN pl_eur > 0 THEN 1 ELSE 0 END) as n_wins, AVG(pl_eur) as avg_pl
+    FROM trades ${where} GROUP BY simbolo ORDER BY pl_total DESC`).all(...params));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// GET /api/trades/calendar?ano=2025&mes=3
+// GET /api/trades/calendar
 router.get("/calendar", (req, res) => {
   try {
-    const db = getDb();
+    const db = getDb(req.session.user.username);
     const { mes } = req.query;
-    const aYear  = yearParam(req.query.ano);
+    const aYear   = yearParam(req.query.ano);
 
-    let sql = `SELECT
-      date(data_fecho) as dia,
-      COUNT(*) as n_trades,
-      SUM(pl_eur) as pl,
-      SUM(CASE WHEN pl_eur > 0 THEN 1 ELSE 0 END) as n_wins
+    let sql = `SELECT date(data_fecho) as dia, COUNT(*) as n_trades,
+      SUM(pl_eur) as pl, SUM(CASE WHEN pl_eur > 0 THEN 1 ELSE 0 END) as n_wins
     FROM trades WHERE 1=1`;
     const params = [];
 
@@ -171,8 +148,7 @@ router.get("/calendar", (req, res) => {
     if (mes)   { sql += " AND strftime('%m', data_fecho) = ?"; params.push(String(mes).padStart(2, "0")); }
     sql += " GROUP BY dia";
 
-    const rows = db.prepare(sql).all(...params);
-    res.json(rows);
+    res.json(db.prepare(sql).all(...params));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

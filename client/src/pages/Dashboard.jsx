@@ -39,7 +39,7 @@ function MetricCard({ label, value, sub, color = "white", onClick }) {
   );
 }
 
-export default function Dashboard() {
+export default function Dashboard({ user }) {
   const [anos, setAnos]         = useState([]);
   const [ano, setAno]           = useState(null);
   const [stats, setStats]       = useState(null);
@@ -52,12 +52,13 @@ export default function Dashboard() {
   const [divTotal, setDivTotal] = useState(null);
   const [modal, setModal]       = useState(null);
   const [loading, setLoading]   = useState(true);
+  const [anosReady, setAnosReady] = useState(false);
 
   useEffect(() => {
     axios.get("/api/trades/anos").then(r => {
       setAnos(r.data);
       if (r.data.length) setAno(r.data[0]);
-    });
+    }).finally(() => setAnosReady(true));
   }, []);
 
   const load = useCallback(async (a) => {
@@ -164,8 +165,61 @@ export default function Dashboard() {
     return maxDD;
   }, [equity]);
 
+  if (!anosReady) return <div className="spinner" />;
+
+  if (anosReady && anos.length === 0) {
+    const initials = user?.slice(0, 2).toUpperCase() ?? "?";
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        minHeight: "70vh", textAlign: "center", gap: 24 }}>
+        <div style={{
+          width: 72, height: 72, borderRadius: 20,
+          background: "linear-gradient(135deg, #4f6af5, #7c3aed)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: "1.5rem", fontWeight: 800, color: "#fff", letterSpacing: "-1px",
+        }}>{initials}</div>
+        <div>
+          <h2 style={{ margin: 0, fontSize: "1.5rem", fontWeight: 800, color: "var(--text)" }}>
+            Bem-vindo, {user}!
+          </h2>
+          <p style={{ margin: "10px 0 0", fontSize: "0.9rem", color: "var(--mute)", maxWidth: 420, lineHeight: 1.7 }}>
+            A tua conta está pronta. Ainda não tens relatórios carregados —
+            começa por importar as tuas operações para veres o teu desempenho aqui.
+          </p>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 10 }}>
+            <div style={{
+              background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12,
+              padding: "16px 20px", width: 160, textAlign: "left",
+            }}>
+              <div style={{ fontSize: "1.4rem", marginBottom: 6 }}>📥</div>
+              <div style={{ fontWeight: 700, fontSize: "0.85rem", color: "var(--text)" }}>Importar Dados</div>
+              <div style={{ fontSize: "0.72rem", color: "var(--mute)", marginTop: 4, lineHeight: 1.5 }}>
+                Carrega os teus ficheiros de operações via a página de importação
+              </div>
+            </div>
+            <div style={{
+              background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12,
+              padding: "16px 20px", width: 160, textAlign: "left",
+            }}>
+              <div style={{ fontSize: "1.4rem", marginBottom: 6 }}>📊</div>
+              <div style={{ fontWeight: 700, fontSize: "0.85rem", color: "var(--text)" }}>Ver Estatísticas</div>
+              <div style={{ fontSize: "0.72rem", color: "var(--mute)", marginTop: 4, lineHeight: 1.5 }}>
+                Após importares, as tuas métricas e gráficos aparecem aqui automaticamente
+              </div>
+            </div>
+          </div>
+          <p style={{ fontSize: "0.72rem", color: "var(--mute)", margin: 0 }}>
+            Usa o menu lateral para navegar entre as secções
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) return <div className="spinner" />;
-  if (!stats)  return <div className="empty">Ainda não existem dados para mostrar. Importe primeiro os seus relatórios.</div>;
+  if (!stats)  return null;
 
   const wr          = stats.win_rate ?? 0;
   const pf          = stats.profit_factor ?? 0;
