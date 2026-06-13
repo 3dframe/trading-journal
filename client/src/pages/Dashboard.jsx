@@ -82,6 +82,8 @@ export default function Dashboard({ user }) {
       setRecent(rec.data.slice(0, 8));
       setDivTotal(divs.data);
       setAllDivs(divsAll.data);
+    } catch {
+      setStats(null);
     } finally {
       setLoading(false);
     }
@@ -219,7 +221,14 @@ export default function Dashboard({ user }) {
   }
 
   if (loading) return <div className="spinner" />;
-  if (!stats)  return null;
+  if (!stats)  return (
+    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+      height:"60vh", gap:12, color:"var(--mute)" }}>
+      <span style={{ fontSize:"2rem" }}>⚠️</span>
+      <span style={{ fontSize:"0.9rem" }}>Erro ao carregar dados. Tenta recarregar a página.</span>
+      <button className="btn btn-primary" onClick={() => load(ano)} style={{ marginTop:8 }}>Tentar novamente</button>
+    </div>
+  );
 
   const wr          = stats.win_rate ?? 0;
   const pf          = stats.profit_factor ?? 0;

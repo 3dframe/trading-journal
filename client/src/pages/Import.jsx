@@ -21,7 +21,9 @@ export default function Import() {
   const inputRef = useRef();
 
   useEffect(() => {
-    axios.get("/api/import/info").then(r => setMode(r.data.mode));
+    axios.get("/api/import/info")
+      .then(r => setMode(r.data.mode))
+      .catch(() => setMode("local"));
   }, []);
 
   const reset = () => { setFile(null); setPreview(null); setStatus(null); };

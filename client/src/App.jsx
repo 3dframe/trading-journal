@@ -108,6 +108,7 @@ const PAGES = [
 
 export default function App() {
   const [page, setPage]           = useState("dashboard");
+  const [pageLoading, setPageLoading] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [hovered, setHovered]     = useState(false);
   const [darkMode, setDarkMode]   = useState(true);
@@ -115,6 +116,14 @@ export default function App() {
   const [isAdmin, setIsAdmin]     = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [cookiesOk, setCookiesOk] = useState(() => localStorage.getItem("cookies_accepted") === "1");
+
+  const navigateTo = (id) => {
+    if (id === page) return;
+    setPageLoading(true);
+    setPage(id);
+    // Simula breve delay de transição; as páginas sinalizam o fim via useEffect
+    setTimeout(() => setPageLoading(false), 400);
+  };
 
   useEffect(() => {
     axios.get("/api/auth/me")
@@ -203,7 +212,7 @@ export default function App() {
             <button
               key={p.id}
               className={`nav-item ${page === p.id ? "active" : ""}`}
-              onClick={() => setPage(p.id)}
+              onClick={() => navigateTo(p.id)}
               title={collapsed && !hovered ? p.label : undefined}
             >
               <span className="nav-icon">{p.icon}</span>
@@ -266,7 +275,22 @@ export default function App() {
 
         {/* Page content */}
         <main className="main-content">
-          {renderPage()}
+          {pageLoading && (
+            <div style={{
+              position: "fixed", top: 0, left: 0, right: 0,
+              height: 3, zIndex: 9999,
+              background: "linear-gradient(90deg, var(--accent), #7c5cfc)",
+              animation: "page-bar 0.4s ease-out forwards",
+            }} />
+          )}
+          <div
+            key={page}
+            style={{
+              animation: "page-fade 0.25s ease-out",
+            }}
+          >
+            {renderPage()}
+          </div>
         </main>
       </div>
 

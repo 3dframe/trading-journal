@@ -2,6 +2,7 @@ const express      = require("express");
 const cors         = require("cors");
 const path         = require("path");
 const session      = require("express-session");
+const FileStore    = require("session-file-store")(session);
 const requireAuth  = require("./middleware/requireAuth");
 const requireAdmin = require("./middleware/requireAdmin");
 
@@ -14,15 +15,15 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Sessões em memória — perdem-se ao reiniciar o servidor (força sempre login)
 app.use(session({
+  store: new FileStore({ path: path.join(__dirname, "sessions"), logFn: () => {} }),
   secret: process.env.SESSION_SECRET || "trading-journal-secret-dev",
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    // Sem maxAge → cookie de sessão: apaga quando o browser fecha
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 dias
   },
 }));
 

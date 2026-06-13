@@ -61,7 +61,7 @@ function getDb(username) {
     dbPath = path.join(DATA_DIR, `${username}.db`);
   }
 
-  const db = new DatabaseSync(dbPath);
+  const db = new DatabaseSync(dbPath.replace(/\\/g, "/"));
   db.exec("PRAGMA journal_mode = WAL");
 
   // Inicializa esquema para bases de dados novas
