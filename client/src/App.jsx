@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import Dashboard   from "./pages/Dashboard.jsx";
 import TradeLog    from "./pages/TradeLog.jsx";
@@ -116,7 +116,9 @@ export default function App() {
   const [fullName, setFullName]   = useState(null);
   const [isAdmin, setIsAdmin]     = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
-  const [cookiesOk, setCookiesOk] = useState(() => localStorage.getItem("cookies_accepted") === "1");
+  const [cookiesOk, setCookiesOk]     = useState(() => localStorage.getItem("cookies_accepted") === "1");
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef(null);
 
   const navigateTo = (id) => {
     if (id === page) return;
@@ -131,6 +133,16 @@ export default function App() {
       .then(r => { setUser(r.data.username); setFullName(r.data.fullName); setIsAdmin(!!r.data.isAdmin); })
       .catch(() => { setUser(null); setFullName(null); setIsAdmin(false); })
       .finally(() => setAuthChecked(true));
+  }, []);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
+        setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
   }, []);
 
   const logout = async () => {
@@ -260,24 +272,57 @@ export default function App() {
             <div className="topbar-icon-btn" onClick={toggleTheme} style={{ cursor: "pointer" }}>
               {darkMode ? <MoonIcon /> : <SunIcon />}
             </div>
-            <span style={{
-              background: "linear-gradient(135deg, var(--accent), #7c3aed)",
-              color: "#fff", fontWeight: 700, fontSize: "0.78rem",
-              padding: "5px 14px", borderRadius: 20, whiteSpace: "nowrap",
-            }}>
-              {fullName || user}
-            </span>
-            <button
-              onClick={logout}
-              className="topbar-logout-btn"
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                <polyline points="16 17 21 12 16 7"/>
-                <line x1="21" y1="12" x2="9" y2="12"/>
-              </svg>
-              Sair
-            </button>
+
+            {/* User pill with dropdown */}
+            <div ref={userMenuRef} style={{ position: "relative" }}>
+              <span
+                onClick={() => setUserMenuOpen(o => !o)}
+                style={{
+                  background: "linear-gradient(135deg, var(--accent), #7c3aed)",
+                  color: "#fff", fontWeight: 700, fontSize: "0.78rem",
+                  padding: "5px 14px", borderRadius: 20, whiteSpace: "nowrap",
+                  cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: 6,
+                }}
+              >
+                {fullName || user}
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                  style={{ opacity: .75, transition: "transform .2s", transform: userMenuOpen ? "rotate(180deg)" : "rotate(0deg)" }}>
+                  <polyline points="6 9 12 15 18 9"/>
+                </svg>
+              </span>
+
+              {userMenuOpen && (
+                <div style={{
+                  position: "absolute", top: "calc(100% + 8px)", right: 0,
+                  background: "var(--card)", border: "1px solid var(--border)",
+                  borderRadius: 10, padding: 6, minWidth: 180,
+                  boxShadow: "0 8px 28px rgba(0,0,0,0.35)", zIndex: 1000,
+                }}>
+                  <div style={{ padding: "6px 12px 10px", fontSize: "0.72rem", color: "var(--mute)", borderBottom: "1px solid var(--border)", marginBottom: 4, lineHeight: 1.4 }}>
+                    <div style={{ fontWeight: 700, color: "var(--text)", fontSize: "0.8rem" }}>{fullName || user}</div>
+                    <div style={{ marginTop: 2 }}>Conta local</div>
+                  </div>
+                  <button
+                    onClick={() => { setUserMenuOpen(false); logout(); }}
+                    style={{
+                      width: "100%", padding: "8px 12px", background: "none", border: "none",
+                      color: "#f43f5e", fontSize: "0.82rem", fontWeight: 600, cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: 8, borderRadius: 6,
+                      transition: "background .15s", fontFamily: "var(--font)",
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = "rgba(244,63,94,0.1)"}
+                    onMouseLeave={e => e.currentTarget.style.background = "none"}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                      <polyline points="16 17 21 12 16 7"/>
+                      <line x1="21" y1="12" x2="9" y2="12"/>
+                    </svg>
+                    Sair
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 

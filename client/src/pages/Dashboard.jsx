@@ -39,10 +39,10 @@ function StatIconCard({ icon, value, label, color, colorBg, onClick }) {
         borderRadius: 14, padding: "16px 18px",
         display: "flex", alignItems: "center", gap: 14,
         cursor: onClick ? "pointer" : "default", flexShrink: 0, minWidth: 190,
-        transition: "border-color .2s, transform .2s",
+        transition: "border-color .2s",
       }}
-      onMouseEnter={e => { if (onClick) { e.currentTarget.style.borderColor = color; e.currentTarget.style.transform = "translateY(-2px)"; }}}
-      onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.transform = ""; }}
+      onMouseEnter={e => { if (onClick) e.currentTarget.style.borderColor = color; }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; }}
     >
       <div style={{ width: 46, height: 46, borderRadius: 12, flexShrink: 0, background: colorBg, display: "flex", alignItems: "center", justifyContent: "center" }}>
         {icon}
