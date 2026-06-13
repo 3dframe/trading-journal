@@ -336,9 +336,18 @@ export default function Dashboard({ user }) {
           <div className="page-title">Visão Geral</div>
           <div className="page-sub">Resumo do desempenho e da sua atividade de trading</div>
         </div>
-        <select value={ano ?? ""} onChange={e => setAno(Number(e.target.value))}>
-          {anos.map(a => <option key={a} value={a}>{a}</option>)}
-        </select>
+        <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#4f6af5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+            style={{ position: "absolute", left: 10, pointerEvents: "none", flexShrink: 0 }}>
+            <rect x="3" y="4" width="18" height="18" rx="2"/>
+            <line x1="16" y1="2" x2="16" y2="6"/>
+            <line x1="8"  y1="2" x2="8"  y2="6"/>
+            <line x1="3"  y1="10" x2="21" y2="10"/>
+          </svg>
+          <select value={ano ?? ""} onChange={e => setAno(Number(e.target.value))} style={{ paddingLeft: 32 }}>
+            {anos.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </div>
       </div>
 
       {/* ── Top 5 stat icon cards ── */}
