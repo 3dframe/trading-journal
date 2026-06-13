@@ -13,6 +13,7 @@ function loadUsers() {
 }
 
 function initSchema(db) {
+  // 1. Criar tabelas base (sem colunas novas — IF NOT EXISTS não as altera)
   db.exec(`
     CREATE TABLE IF NOT EXISTS trades (
       id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,7 +43,25 @@ function initSchema(db) {
       moeda            TEXT,
       corretora        TEXT
     );
+    CREATE TABLE IF NOT EXISTS import_history (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      filename    TEXT,
+      corretora   TEXT,
+      n_trades    INTEGER DEFAULT 0,
+      n_dividends INTEGER DEFAULT 0,
+      n_skipped   INTEGER DEFAULT 0,
+      imported_at TEXT DEFAULT (datetime('now','localtime'))
+    );
   `);
+
+  // 2. Migrations de colunas (primeiro as colunas, depois os índices que dependem delas)
+  try { db.exec("ALTER TABLE trades ADD COLUMN ref_externa TEXT"); } catch {}
+
+  // 3. Índices únicos (só depois de garantir que as colunas existem)
+  try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_ref
+    ON trades(corretora, ref_externa) WHERE ref_externa IS NOT NULL`); } catch {}
+  try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_divs_unique
+    ON dividendos(simbolo, data_pagamento, corretora)`); } catch {}
 }
 
 function getDb(username) {
@@ -63,9 +82,7 @@ function getDb(username) {
 
   const db = new DatabaseSync(dbPath.replace(/\\/g, "/"));
   db.exec("PRAGMA journal_mode = WAL");
-
-  // Inicializa esquema para bases de dados novas
-  if (!user?.dbPath) initSchema(db);
+  initSchema(db);
 
   _dbs[username] = db;
   return db;

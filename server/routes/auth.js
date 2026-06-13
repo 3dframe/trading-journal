@@ -29,7 +29,7 @@ function appendLog(entry) {
 
 // POST /api/auth/register
 router.post("/register", async (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, fullName } = req.body;
   if (!username || !password)
     return res.status(400).json({ error: "Username e password obrigatórios." });
   if (username.length < 3)
@@ -43,12 +43,12 @@ router.post("/register", async (req, res) => {
 
   const passwordHash = await bcrypt.hash(password, 12);
   const now = new Date().toISOString();
-  users.push({ username, passwordHash, lastLogin: now });
+  users.push({ username, fullName: fullName?.trim() || username, passwordHash, lastLogin: now });
   saveUsers(users);
 
   appendLog({ username, action: "register", timestamp: now, ip: req.ip });
-  req.session.user = { username };
-  res.json({ username });
+  req.session.user = { username, fullName: fullName?.trim() || username };
+  res.json({ username, fullName: fullName?.trim() || username });
 });
 
 // POST /api/auth/login
@@ -73,8 +73,9 @@ router.post("/login", async (req, res) => {
   saveUsers(users);
   appendLog({ username: user.username, action: "login", timestamp: now, ip: req.ip });
 
-  req.session.user = { username: user.username, isAdmin: !!user.isAdmin };
-  res.json({ username: user.username, isAdmin: !!user.isAdmin });
+  const fullName = user.fullName || user.username;
+  req.session.user = { username: user.username, fullName, isAdmin: !!user.isAdmin };
+  res.json({ username: user.username, fullName, isAdmin: !!user.isAdmin });
 });
 
 // POST /api/auth/logout
@@ -91,7 +92,11 @@ router.post("/logout", (req, res) => {
 router.get("/me", (req, res) => {
   if (!req.session.user)
     return res.status(401).json({ error: "Não autenticado." });
-  res.json({ username: req.session.user.username, isAdmin: !!req.session.user.isAdmin });
+  res.json({
+    username: req.session.user.username,
+    fullName: req.session.user.fullName || req.session.user.username,
+    isAdmin:  !!req.session.user.isAdmin,
+  });
 });
 
 module.exports = router;

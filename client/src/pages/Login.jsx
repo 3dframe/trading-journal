@@ -4,6 +4,7 @@ import axios from "axios";
 export default function Login({ onLogin }) {
   const [mode, setMode]       = useState("login"); // "login" | "register"
   const [username, setUser]   = useState("");
+  const [fullName, setName]   = useState("");
   const [password, setPass]   = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError]     = useState("");
@@ -13,6 +14,7 @@ export default function Login({ onLogin }) {
     setMode(m);
     setError("");
     setUser("");
+    setName("");
     setPass("");
     setConfirm("");
   };
@@ -29,7 +31,7 @@ export default function Login({ onLogin }) {
     setLoad(true);
     try {
       const endpoint = mode === "login" ? "/api/auth/login" : "/api/auth/register";
-      const { data } = await axios.post(endpoint, { username, password }, { withCredentials: true });
+      const { data } = await axios.post(endpoint, { username, password, fullName }, { withCredentials: true });
       onLogin(data);
     } catch (err) {
       setError(err.response?.data?.error || "Ocorreu um erro. Tenta novamente.");
@@ -112,16 +114,28 @@ export default function Login({ onLogin }) {
             />
           </div>
           {!isLogin && (
-            <div>
-              <label style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--mute)", textTransform: "uppercase", letterSpacing: ".08em" }}>
-                Confirmar Password
-              </label>
-              <input
-                type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
-                autoComplete="new-password"
-                style={{ width: "100%", marginTop: 6, boxSizing: "border-box" }}
-              />
-            </div>
+            <>
+              <div>
+                <label style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--mute)", textTransform: "uppercase", letterSpacing: ".08em" }}>
+                  Nome Completo
+                </label>
+                <input
+                  type="text" value={fullName} onChange={e => setName(e.target.value)}
+                  autoComplete="name" placeholder="Ex: Paulo Jorge Carmo"
+                  style={{ width: "100%", marginTop: 6, boxSizing: "border-box" }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--mute)", textTransform: "uppercase", letterSpacing: ".08em" }}>
+                  Confirmar Password
+                </label>
+                <input
+                  type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
+                  autoComplete="new-password"
+                  style={{ width: "100%", marginTop: 6, boxSizing: "border-box" }}
+                />
+              </div>
+            </>
           )}
 
           {error && (

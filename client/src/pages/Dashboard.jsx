@@ -15,6 +15,67 @@ const fmtAbs = v =>
 
 const GREEN = "#10b981", RED = "#f43f5e", BLUE = "#4f6af5", MUTE = "#4e6080";
 
+function SkBox({ h, w = "100%", r = 6 }) {
+  return <div className="skeleton-box" style={{ height: h, width: w, borderRadius: r, flexShrink: 0 }} />;
+}
+
+function DashboardSkeleton() {
+  return (
+    <>
+      <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <SkBox h={22} w={150} />
+          <SkBox h={13} w={290} r={4} />
+        </div>
+        <SkBox h={34} w={96} r={8} />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginBottom: 12 }}>
+        {Array(5).fill(0).map((_, i) => (
+          <div key={i} className="metric-card" style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "center" }}>
+            <SkBox h={11} w={70} r={4} />
+            <SkBox h={22} w={100} />
+            <SkBox h={10} w={85} r={4} />
+          </div>
+        ))}
+      </div>
+
+      <div className="metric-grid">
+        {Array(9).fill(0).map((_, i) => (
+          <div key={i} className="metric-card" style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "center" }}>
+            <SkBox h={11} w={65} r={4} />
+            <SkBox h={20} w={90} />
+            <SkBox h={10} w={75} r={4} />
+          </div>
+        ))}
+      </div>
+
+      <div className="grid-2" style={{ marginBottom: 24 }}>
+        <div className="card"><SkBox h={260} /></div>
+        <div className="card"><SkBox h={260} /></div>
+      </div>
+
+      <div className="grid-2" style={{ marginBottom: 24 }}>
+        <div className="card"><SkBox h={230} /></div>
+        <div className="card"><SkBox h={230} /></div>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 20 }}>
+        {Array(6).fill(0).map((_, i) => (
+          <div key={i} className="trade-row" style={{ pointerEvents: "none" }}>
+            <SkBox h={16} w={64} r={4} />
+            <SkBox h={22} w={44} r={20} />
+            <SkBox h={13} w={110} r={4} />
+            <SkBox h={13} w={72} r={4} />
+            <div style={{ marginLeft: "auto" }}><SkBox h={16} w={80} r={4} /></div>
+            <SkBox h={13} w={70} r={4} />
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 const TooltipDark = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   return (
@@ -167,7 +228,7 @@ export default function Dashboard({ user }) {
     return maxDD;
   }, [equity]);
 
-  if (!anosReady) return <div className="spinner" />;
+  if (!anosReady) return <DashboardSkeleton />;
 
   if (anosReady && anos.length === 0) {
     const initials = user?.slice(0, 2).toUpperCase() ?? "?";
@@ -220,7 +281,7 @@ export default function Dashboard({ user }) {
     );
   }
 
-  if (loading) return <div className="spinner" />;
+  if (loading) return <DashboardSkeleton />;
   if (!stats)  return (
     <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
       height:"60vh", gap:12, color:"var(--mute)" }}>

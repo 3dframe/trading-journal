@@ -113,6 +113,7 @@ export default function App() {
   const [hovered, setHovered]     = useState(false);
   const [darkMode, setDarkMode]   = useState(true);
   const [user, setUser]           = useState(null);
+  const [fullName, setFullName]   = useState(null);
   const [isAdmin, setIsAdmin]     = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [cookiesOk, setCookiesOk] = useState(() => localStorage.getItem("cookies_accepted") === "1");
@@ -127,14 +128,15 @@ export default function App() {
 
   useEffect(() => {
     axios.get("/api/auth/me")
-      .then(r => { setUser(r.data.username); setIsAdmin(!!r.data.isAdmin); })
-      .catch(() => { setUser(null); setIsAdmin(false); })
+      .then(r => { setUser(r.data.username); setFullName(r.data.fullName); setIsAdmin(!!r.data.isAdmin); })
+      .catch(() => { setUser(null); setFullName(null); setIsAdmin(false); })
       .finally(() => setAuthChecked(true));
   }, []);
 
   const logout = async () => {
     await axios.post("/api/auth/logout");
     setUser(null);
+    setFullName(null);
     setIsAdmin(false);
   };
 
@@ -144,7 +146,7 @@ export default function App() {
   };
 
   if (!authChecked) return null;
-  if (!user) return <Login onLogin={d => { setUser(d.username); setIsAdmin(!!d.isAdmin); }} />;
+  if (!user) return <Login onLogin={d => { setUser(d.username); setFullName(d.fullName); setIsAdmin(!!d.isAdmin); setPage("dashboard"); }} />;
 
   const toggleTheme = () => {
     const next = !darkMode;
@@ -160,7 +162,7 @@ export default function App() {
 
   const renderPage = () => {
     switch (page) {
-      case "dashboard":  return <Dashboard user={user} />;
+      case "dashboard":  return <Dashboard user={fullName || user} />;
       case "tradelog":   return <TradeLog />;
       case "calendar":   return <Calendar />;
       case "statistics": return <Statistics />;
@@ -258,7 +260,13 @@ export default function App() {
             <div className="topbar-icon-btn" onClick={toggleTheme} style={{ cursor: "pointer" }}>
               {darkMode ? <MoonIcon /> : <SunIcon />}
             </div>
-            <div className="topbar-avatar" title={user}>{user?.slice(0,2).toUpperCase()}</div>
+            <span style={{
+              background: "linear-gradient(135deg, var(--accent), #7c3aed)",
+              color: "#fff", fontWeight: 700, fontSize: "0.78rem",
+              padding: "5px 14px", borderRadius: 20, whiteSpace: "nowrap",
+            }}>
+              {fullName || user}
+            </span>
             <button
               onClick={logout}
               className="topbar-logout-btn"
