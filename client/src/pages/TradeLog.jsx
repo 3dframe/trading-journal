@@ -104,8 +104,38 @@ export default function TradeLog() {
           <option value="XTB">XTB</option>
           <option value="IBKR">IBKR</option>
         </select>
-        <input placeholder="🔍 Símbolo..." value={simbolo}
-          onChange={e => setSim(e.target.value)} style={{ width: 160, marginLeft: "auto" }} />
+        <div style={{ position: "relative", marginLeft: "auto", width: 180 }}>
+          <svg style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", opacity: 0.45 }}
+            width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input
+            placeholder="Símbolo..."
+            value={simbolo}
+            onChange={e => setSim(e.target.value)}
+            style={{
+              width: "100%", boxSizing: "border-box",
+              paddingLeft: 32, paddingRight: simbolo ? 28 : 10,
+              paddingTop: 7, paddingBottom: 7,
+              background: "rgba(255,255,255,0.05)",
+              border: "1px solid rgba(255,255,255,0.12)",
+              borderRadius: 8,
+              color: "var(--text)", fontSize: "0.83rem",
+              outline: "none", fontFamily: "var(--font)",
+              transition: "border-color .15s",
+            }}
+            onFocus={e => e.target.style.borderColor = "rgba(79,106,245,0.6)"}
+            onBlur={e => e.target.style.borderColor = "rgba(255,255,255,0.12)"}
+          />
+          {simbolo && (
+            <button onClick={() => setSim("")}
+              style={{
+                position: "absolute", right: 7, top: "50%", transform: "translateY(-50%)",
+                background: "none", border: "none", cursor: "pointer", padding: 0,
+                color: MUTE, fontSize: 14, lineHeight: 1, display: "flex", alignItems: "center",
+              }}>✕</button>
+          )}
+        </div>
       </div>
 
       {loading ? <div className="spinner" /> : rows.length === 0 ? (

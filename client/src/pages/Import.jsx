@@ -133,15 +133,17 @@ function HistoryPanel({ history, onDelete }) {
 }
 
 export default function Import() {
-  const [mode, setMode]       = useState(null);
-  const [file, setFile]       = useState(null);   // { f, tipo }
-  const [preview, setPreview] = useState(null);
-  const [status, setStatus]   = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [history, setHistory] = useState([]);
+  const [mode, setMode]         = useState(null);
+  const [file, setFile]         = useState(null);
+  const [preview, setPreview]   = useState(null);
+  const [status, setStatus]     = useState(null);
+  const [loading, setLoading]   = useState(false);
+  const [history, setHistory]   = useState([]);
+  const [deposits, setDeposits] = useState([]);
 
   const fetchHistory = useCallback(() => {
     axios.get("/api/import/history").then(r => setHistory(r.data)).catch(() => {});
+    axios.get("/api/import/deposits").then(r => setDeposits(r.data)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -183,7 +185,7 @@ export default function Import() {
       form.append("file", file.f);
       form.append("tipo", file.tipo);
       const { data } = await axios.post("/api/import/confirm", form);
-      setStatus({ ok: true, nTrades: data.nTrades, nDividends: data.nDividends, nSkipped: data.nSkipped });
+      setStatus({ ok: true, nTrades: data.nTrades, nDividends: data.nDividends, nDeposits: data.nDeposits, nSkipped: data.nSkipped });
       setPreview(null);
       setFile(null);
       fetchHistory();
@@ -292,10 +294,12 @@ export default function Import() {
                 <div style={{ fontWeight: 700, fontSize: "0.85rem", color: "var(--text)", marginBottom: 8 }}>
                   Resultado da análise
                 </div>
-                <div style={{ display: "flex", gap: 20, fontSize: "0.82rem", color: "var(--mute)" }}>
+                <div style={{ display: "flex", gap: 20, fontSize: "0.82rem", color: "var(--mute)", flexWrap: "wrap" }}>
                   <span>📈 <strong style={{ color: "var(--text)" }}>{preview.nTrades}</strong> operações</span>
                   {preview.nDividends > 0 &&
                     <span>💰 <strong style={{ color: "var(--text)" }}>{preview.nDividends}</strong> dividendos</span>}
+                  {preview.nDeposits > 0 &&
+                    <span>🏦 <strong style={{ color: "var(--text)" }}>{preview.nDeposits}</strong> depósitos/levantamentos</span>}
                 </div>
               </div>
 
@@ -363,7 +367,7 @@ export default function Import() {
               <div>
                 <div style={{ fontWeight: 700, color: "#22c55e", fontSize: "0.88rem" }}>Importação concluída!</div>
                 <div style={{ fontSize: "0.75rem", color: "var(--mute)", marginTop: 2 }}>
-                  {status.nTrades} operações{status.nDividends ? ` e ${status.nDividends} dividendos` : ""} importados.
+                  {status.nTrades} operações{status.nDividends ? `, ${status.nDividends} dividendos` : ""}{status.nDeposits ? `, ${status.nDeposits} depósitos` : ""} importados.
                   {status.nSkipped > 0 && ` ${status.nSkipped} duplicados ignorados.`}
                 </div>
               </div>
@@ -380,15 +384,70 @@ export default function Import() {
           )}
         </div>
 
-        {/* ── Coluna direita: histórico ── */}
-        <div className="card" style={{ padding: "18px 16px" }}>
-          <div style={{
-            fontSize: "0.7rem", fontWeight: 700, color: "var(--mute)",
-            textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 14,
-          }}>
-            Histórico de Importações
+        {/* ── Coluna direita ── */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div className="card" style={{ padding: "18px 16px" }}>
+            <div style={{
+              fontSize: "0.7rem", fontWeight: 700, color: "var(--mute)",
+              textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 14,
+            }}>
+              Histórico de Importações
+            </div>
+            <HistoryPanel history={history} onDelete={deleteHistory} />
           </div>
-          <HistoryPanel history={history} onDelete={deleteHistory} />
+
+          {/* Depósitos e levantamentos */}
+          <div className="card" style={{ padding: "18px 16px" }}>
+            <div style={{
+              fontSize: "0.7rem", fontWeight: 700, color: "var(--mute)",
+              textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 14,
+            }}>
+              🏦 Depósitos / Levantamentos
+            </div>
+            {deposits.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "20px 0", color: "var(--mute)", fontSize: "0.78rem" }}>
+                Nenhum movimento detectado.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 320, overflowY: "auto" }}>
+                {deposits.map(d => {
+                  const isDeposit = d.tipo === "deposito";
+                  return (
+                    <div key={d.id} style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: "8px 10px", borderRadius: 8,
+                      background: isDeposit ? "rgba(34,197,94,0.06)" : "rgba(244,63,94,0.06)",
+                      border: `1px solid ${isDeposit ? "rgba(34,197,94,0.18)" : "rgba(244,63,94,0.18)"}`,
+                    }}>
+                      <div>
+                        <div style={{ fontSize: "0.68rem", color: "var(--mute)" }}>
+                          {d.data?.slice(0, 10)} · <span style={{ fontWeight: 600, color: "var(--text)" }}>{d.corretora}</span>
+                        </div>
+                        {d.descricao && (
+                          <div style={{ fontSize: "0.6rem", color: "var(--mute)", marginTop: 2, maxWidth: 160,
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {d.descricao}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{
+                        fontWeight: 700, fontSize: "0.82rem",
+                        color: isDeposit ? "#22c55e" : "#f43f5e",
+                      }}>
+                        {isDeposit ? "+" : "−"}€{d.valor.toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                    </div>
+                  );
+                })}
+                <div style={{ fontSize: "0.65rem", color: "var(--mute)", marginTop: 6, textAlign: "right" }}>
+                  Total depositado: <strong style={{ color: "var(--text)" }}>
+                    €{deposits.filter(d => d.tipo === "deposito").reduce((s, d) => s + d.valor, 0)
+                      .toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </strong>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
       </div>

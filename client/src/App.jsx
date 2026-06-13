@@ -8,6 +8,7 @@ import Import      from "./pages/Import.jsx";
 import IRS         from "./pages/IRS.jsx";
 import Login       from "./pages/Login.jsx";
 import Admin       from "./pages/Admin.jsx";
+import Settings    from "./pages/Settings.jsx";
 
 axios.defaults.withCredentials = true;
 
@@ -170,7 +171,8 @@ export default function App() {
     ? [...PAGES, { id: "admin", label: "Administração", icon: <AdminIcon /> }]
     : PAGES;
 
-  const currentPage = navPages.find(p => p.id === page);
+  const currentPage = navPages.find(p => p.id === page)
+    || (page === "settings" ? { label: "Definições" } : null);
 
   const renderPage = () => {
     switch (page) {
@@ -181,6 +183,7 @@ export default function App() {
       case "import":     return <Import />;
       case "irs":        return <IRS />;
       case "admin":      return isAdmin ? <Admin /> : <Dashboard />;
+      case "settings":   return <Settings user={user} fullName={fullName} onFullNameChange={n => setFullName(n)} />;
       default:           return <Dashboard />;
     }
   };
@@ -300,8 +303,26 @@ export default function App() {
                 }}>
                   <div style={{ padding: "6px 12px 10px", fontSize: "0.72rem", color: "var(--mute)", borderBottom: "1px solid var(--border)", marginBottom: 4, lineHeight: 1.4 }}>
                     <div style={{ fontWeight: 700, color: "var(--text)", fontSize: "0.8rem" }}>{fullName || user}</div>
-                    <div style={{ marginTop: 2 }}>Conta local</div>
+                    <div style={{ marginTop: 2 }}>{isAdmin ? "Administrador" : "Conta local"}</div>
                   </div>
+                  <button
+                    onClick={() => { setUserMenuOpen(false); navigateTo("settings"); }}
+                    style={{
+                      width: "100%", padding: "8px 12px", background: "none", border: "none",
+                      color: "var(--text)", fontSize: "0.82rem", fontWeight: 600, cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: 8, borderRadius: 6,
+                      transition: "background .15s", fontFamily: "var(--font)",
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = "var(--hover)"}
+                    onMouseLeave={e => e.currentTarget.style.background = "none"}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="3"/>
+                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                    </svg>
+                    Definições
+                  </button>
+                  <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
                   <button
                     onClick={() => { setUserMenuOpen(false); logout(); }}
                     style={{

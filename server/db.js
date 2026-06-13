@@ -52,16 +52,37 @@ function initSchema(db) {
       n_skipped   INTEGER DEFAULT 0,
       imported_at TEXT DEFAULT (datetime('now','localtime'))
     );
+    CREATE TABLE IF NOT EXISTS depositos (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      data      TEXT,
+      valor     REAL,
+      tipo      TEXT,
+      corretora TEXT,
+      descricao TEXT
+    );
   `);
 
-  // 2. Migrations de colunas (primeiro as colunas, depois os índices que dependem delas)
+  // 2. Migrations de colunas
   try { db.exec("ALTER TABLE trades ADD COLUMN ref_externa TEXT"); } catch {}
+  try { db.exec("ALTER TABLE trades ADD COLUMN fees REAL"); } catch {}
+  try { db.exec("ALTER TABLE trades ADD COLUMN volume REAL"); } catch {}
+  try { db.exec("ALTER TABLE trades ADD COLUMN valor_compra_eur REAL"); } catch {}
+  try { db.exec("ALTER TABLE trades ADD COLUMN valor_venda_eur REAL"); } catch {}
+  try { db.exec("ALTER TABLE trades ADD COLUMN moeda_original TEXT"); } catch {}
+  try { db.exec("ALTER TABLE trades ADD COLUMN tipo TEXT"); } catch {}
+  try { db.exec("ALTER TABLE trades ADD COLUMN pais TEXT"); } catch {}
+  try { db.exec("ALTER TABLE trades ADD COLUMN conta TEXT"); } catch {}
+
+  // Migration: consolidate 'tipo' column (from new imports) into 'tipo_ordem' (original Python column)
+  try { db.exec("UPDATE trades SET tipo_ordem = tipo WHERE tipo_ordem IS NULL AND tipo IS NOT NULL"); } catch {}
 
   // 3. Índices únicos (só depois de garantir que as colunas existem)
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_ref
     ON trades(corretora, ref_externa) WHERE ref_externa IS NOT NULL`); } catch {}
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_divs_unique
     ON dividendos(simbolo, data_pagamento, corretora)`); } catch {}
+  try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_depositos_unique
+    ON depositos(data, valor, corretora, tipo)`); } catch {}
 }
 
 function getDb(username) {

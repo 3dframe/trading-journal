@@ -1,4 +1,4 @@
-const express      = require("express");
+﻿const express      = require("express");
 const cors         = require("cors");
 const path         = require("path");
 const session      = require("express-session");
@@ -27,7 +27,7 @@ app.use(session({
   },
 }));
 
-// Rotas públicas
+// Rotas pÃºblicas
 app.use("/api/auth", require("./routes/auth"));
 
 // Rotas protegidas
@@ -37,7 +37,7 @@ app.use("/api/irs",       requireAuth, require("./routes/irs"));
 app.use("/api/admin",     requireAuth, requireAdmin, require("./routes/admin"));
 app.use("/api/import",    requireAuth, require("./routes/import"));
 
-// Em produção serve o React buildado
+// Em produÃ§Ã£o serve o React buildado
 const clientDist = path.join(__dirname, "..", "client", "dist");
 app.use(express.static(clientDist));
 app.get("*", (req, res) => {
@@ -45,5 +45,5 @@ app.get("*", (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`\n  Trading Journal API → http://localhost:${PORT}\n`);
+  console.log(`\n  Trading Journal API â†’ http://localhost:${PORT}\n`);
 });

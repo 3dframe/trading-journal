@@ -24,7 +24,10 @@ function loadUsers() {
 }
 function hasCustomDb(username) {
   const u = loadUsers().find(u => u.username.toLowerCase() === username.toLowerCase());
-  return !!u?.dbPath;
+  if (!u?.dbPath) return false;
+  const resolved = path.resolve(u.dbPath);
+  const local    = path.resolve(DATA_DIR);
+  return !resolved.startsWith(local + path.sep) && resolved !== local;
 }
 
 const upload = multer({
@@ -38,8 +41,15 @@ function toDate(v) {
   if (v instanceof Date) return v.toISOString().slice(0, 19).replace("T", " ");
   const s = v.toString().trim();
   if (!s || s === "0") return null;
+  // DD/MM/YYYY or DD-MM-YYYY (European format used by IBKR PT)
+  const eu = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (eu) {
+    const [, dd, mm, yyyy] = eu;
+    const d = new Date(`${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`);
+    return isNaN(d) ? null : d.toISOString().slice(0, 10) + " 00:00:00";
+  }
   const d = new Date(s);
-  return isNaN(d) ? s : d.toISOString().slice(0, 19).replace("T", " ");
+  return isNaN(d) ? null : d.toISOString().slice(0, 19).replace("T", " ");
 }
 function toFloat(v) {
   if (v === null || v === undefined || v === "") return 0;
@@ -117,7 +127,9 @@ async function parseXTB(buffer) {
       : saleVal - purchaseVal;
     const fees = Math.abs(toFloat(get(iComm))) + Math.abs(toFloat(get(iSwap)));
 
-    const posId = iPos >= 0 ? get(iPos)?.toString().trim() : null;
+    const posId  = iPos >= 0 ? get(iPos)?.toString().trim() : null;
+    const suffix = symStr.includes(".") ? symStr.split(".").pop().toUpperCase() : "";
+    const pais   = EXCHANGE_COUNTRY[suffix] || null;
     trades.push({
       simbolo:          symStr.split(".")[0].toUpperCase(),
       data_abertura:    toDate(get(iOpen)),
@@ -129,7 +141,8 @@ async function parseXTB(buffer) {
       valor_venda_eur:  iSale >= 0 ? saleVal : null,
       categoria:        isStock ? "STOCK" : "CFD",
       corretora:        "XTB",
-      tipo:             get(iType)?.toString() ?? null,
+      tipo_ordem:       get(iType)?.toString() ?? null,
+      pais,
       ref_externa:      posId || null,
     });
   });
@@ -138,6 +151,7 @@ async function parseXTB(buffer) {
 
   // ── Parse dividends from CASH OPERATION HISTORY sheet ─────
   const dividends = [];
+  const deposits  = [];
   let cashSheet = null;
   let cashHeaderRow = 1;
 
@@ -179,6 +193,21 @@ async function parseXTB(buffer) {
       const isDivid    = type.includes("divid");
       // Só "withholding tax" — exclui "free-funds interest tax" e similares
       const isWithhold = type.includes("withhold");
+      const isDeposit  = type.includes("deposit") || type.includes("deposito") || type.includes("entrada de fundos") || type.includes("fund");
+      const isWithdraw = type.includes("withdrawal") || type.includes("levantamento") || type.includes("saída") || type.includes("saida");
+
+      if (isDeposit || isWithdraw) {
+        const amount = toFloat(get(cAmount));
+        const date   = toDate(get(cDate));
+        if (date && amount !== 0) {
+          deposits.push({
+            data: date, valor: Math.abs(amount),
+            tipo: isDeposit ? "deposito" : "levantamento",
+            corretora: "XTB", descricao: get(cType)?.toString() ?? null,
+          });
+        }
+        return;
+      }
       if (!isDivid && !isWithhold) return;
 
       const sym    = (get(cSym) || "").toString().trim();
@@ -211,7 +240,7 @@ async function parseXTB(buffer) {
     }
   }
 
-  return { trades, dividends };
+  return { trades, dividends, deposits };
 }
 
 // ── IBKR Activity Statement CSV parser ────────────────────
@@ -221,9 +250,11 @@ function parseIBKR(buffer) {
 
   const trades    = [];
   const dividends = [];
+  const deposits  = [];
 
   let tradeHeaders    = null;
   let divHeaders      = null;
+  let depHeaders      = null;
 
   for (const raw of lines) {
     const cols = raw.split(",").map(c => c.replace(/^"|"$/g, "").trim());
@@ -242,10 +273,11 @@ function parseIBKR(buffer) {
       if (cat.toLowerCase().includes("option")) categoria = "OPTION";
       else if (cat.toLowerCase().includes("forex") || cat.toLowerCase().includes("cfd")) categoria = "CFD";
 
-      const pl     = toFloat(g("Realized P/L"));
-      const sym    = (g("Symbol") || "").replace(" ", "").toUpperCase();
-      const dt     = g("Date/Time") || "";
-      const qty    = Math.abs(toFloat(g("Quantity")));
+      const pl      = toFloat(g("Realized P/L"));
+      const sym     = (g("Symbol") || "").replace(" ", "").toUpperCase();
+      const dt      = g("Date/Time") || "";
+      const rawQty  = toFloat(g("Quantity"));
+      const qty     = Math.abs(rawQty);
       trades.push({
         simbolo:          sym,
         data_abertura:    null,
@@ -258,7 +290,7 @@ function parseIBKR(buffer) {
         moeda_original:   g("Currency"),
         categoria,
         corretora:        "IBKR",
-        tipo:             null,
+        tipo_ordem:       rawQty >= 0 ? "BUY" : "SELL",
         ref_externa:      `${sym}|${dt}|${qty}`,
       });
       continue;
@@ -302,22 +334,38 @@ function parseIBKR(buffer) {
         dividends[dividends.length - 1].valor_liq_eur -= ret;
       }
     }
+
+    // Deposits & Withdrawals
+    if (cols[0] === "Deposits & Withdrawals" && cols[1] === "Header") { depHeaders = cols; continue; }
+    if (cols[0] === "Deposits & Withdrawals" && cols[1] === "Data" && depHeaders) {
+      const g = key => { const i = depHeaders.findIndex(h => h === key); return i >= 0 ? cols[i] : null; };
+      const amount = toFloat(g("Amount"));
+      const date   = toDate(g("Date") || g("Settle Date"));
+      const desc   = g("Description") || "";
+      if (date && amount !== 0) {
+        deposits.push({
+          data: date, valor: Math.abs(amount),
+          tipo: amount >= 0 ? "deposito" : "levantamento",
+          corretora: "IBKR", descricao: desc || null,
+        });
+      }
+    }
   }
 
   if (!trades.length && !dividends.length)
     throw new Error("Nenhuma operação encontrada no ficheiro IBKR. Certifica-te que é um Activity Statement completo.");
 
-  return { trades, dividends };
+  return { trades, dividends, deposits };
 }
 
 // ── salvar no SQLite do utilizador ────────────────────────
-function saveData(username, trades, dividends) {
+function saveData(username, trades, dividends, deposits = []) {
   const db = getDb(username);
 
   const insTrade = db.prepare(`INSERT OR IGNORE INTO trades
     (simbolo, data_abertura, data_fecho, pl_eur, volume, fees,
-     valor_compra_eur, valor_venda_eur, moeda_original, categoria, corretora, tipo, ref_externa)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+     valor_compra_eur, valor_venda_eur, moeda_original, categoria, corretora, tipo_ordem, pais, ref_externa)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 
   const insDiv = db.prepare(`INSERT OR IGNORE INTO dividendos
     (simbolo, data_pagamento, valor_bruto_eur, retencao_eur, valor_liq_eur, pais_fonte, moeda, corretora)
@@ -326,7 +374,10 @@ function saveData(username, trades, dividends) {
   const updDivPais = db.prepare(`UPDATE dividendos SET pais_fonte = ?
     WHERE simbolo = ? AND data_pagamento = ? AND corretora = ? AND pais_fonte IS NULL`);
 
-  let insertedTrades = 0, insertedDivs = 0;
+  const insDep = db.prepare(`INSERT OR IGNORE INTO depositos
+    (data, valor, tipo, corretora, descricao) VALUES (?,?,?,?,?)`);
+
+  let insertedTrades = 0, insertedDivs = 0, insertedDeps = 0;
 
   db.exec("BEGIN");
   try {
@@ -335,8 +386,8 @@ function saveData(username, trades, dividends) {
         t.simbolo, t.data_abertura, t.data_fecho, t.pl_eur,
         t.volume ?? null, t.fees ?? null,
         t.valor_compra_eur ?? null, t.valor_venda_eur ?? null,
-        t.moeda_original ?? null, t.categoria, t.corretora, t.tipo ?? null,
-        t.ref_externa ?? null
+        t.moeda_original ?? null, t.categoria, t.corretora, t.tipo_ordem ?? null,
+        t.pais ?? null, t.ref_externa ?? null
       );
       insertedTrades += r.changes;
     }
@@ -347,10 +398,13 @@ function saveData(username, trades, dividends) {
         d.pais_fonte ?? null, d.moeda ?? null, d.corretora
       );
       insertedDivs += r.changes;
-      // Se já existia (IGNORE), atualiza o país se estava vazio
       if (r.changes === 0 && d.pais_fonte) {
         updDivPais.run(d.pais_fonte, d.simbolo, d.data_pagamento, d.corretora);
       }
+    }
+    for (const d of deposits) {
+      const r = insDep.run(d.data, d.valor, d.tipo, d.corretora, d.descricao ?? null);
+      insertedDeps += r.changes;
     }
     db.exec("COMMIT");
   } catch (e) {
@@ -361,7 +415,8 @@ function saveData(username, trades, dividends) {
   return {
     insertedTrades,
     insertedDivs,
-    skipped: (trades.length - insertedTrades) + (dividends.length - insertedDivs),
+    insertedDeps,
+    skipped: (trades.length - insertedTrades) + (dividends.length - insertedDivs) + (deposits.length - insertedDeps),
   };
 }
 
@@ -375,17 +430,18 @@ router.post("/preview", upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "Nenhum ficheiro enviado." });
   const tipo = req.body.tipo; // "xtb" | "ibkr" | "database"
   try {
-    let trades = [], dividends = [];
+    let trades = [], dividends = [], deposits = [];
     if (tipo === "xtb") {
-      ({ trades, dividends } = await parseXTB(req.file.buffer));
+      ({ trades, dividends, deposits } = await parseXTB(req.file.buffer));
     } else if (tipo === "ibkr") {
-      ({ trades, dividends } = parseIBKR(req.file.buffer));
+      ({ trades, dividends, deposits } = parseIBKR(req.file.buffer));
     } else {
       return res.status(400).json({ error: "Tipo inválido." });
     }
     res.json({
       nTrades:    trades.length,
       nDividends: dividends.length,
+      nDeposits:  deposits.length,
       preview:    trades.slice(0, 5),
     });
   } catch (e) {
@@ -401,23 +457,33 @@ router.post("/confirm", upload.single("file"), async (req, res) => {
 
   const tipo = req.body.tipo;
   try {
-    let trades = [], dividends = [];
+    let trades = [], dividends = [], deposits = [];
     if (tipo === "xtb") {
-      ({ trades, dividends } = await parseXTB(req.file.buffer));
+      ({ trades, dividends, deposits } = await parseXTB(req.file.buffer));
     } else if (tipo === "ibkr") {
-      ({ trades, dividends } = parseIBKR(req.file.buffer));
+      ({ trades, dividends, deposits } = parseIBKR(req.file.buffer));
     } else {
       return res.status(400).json({ error: "Tipo inválido." });
     }
-    const stats = saveData(req.session.user.username, trades, dividends);
-    // Regista no histórico
+    const stats = saveData(req.session.user.username, trades, dividends, deposits);
     const db = getDb(req.session.user.username);
     db.prepare(`INSERT INTO import_history (filename, corretora, n_trades, n_dividends, n_skipped)
       VALUES (?,?,?,?,?)`)
       .run(req.file.originalname, tipo.toUpperCase(), stats.insertedTrades, stats.insertedDivs, stats.skipped);
-    res.json({ ok: true, nTrades: stats.insertedTrades, nDividends: stats.insertedDivs, nSkipped: stats.skipped });
+    res.json({ ok: true, nTrades: stats.insertedTrades, nDividends: stats.insertedDivs, nDeposits: stats.insertedDeps, nSkipped: stats.skipped });
   } catch (e) {
     res.status(422).json({ error: e.message });
+  }
+});
+
+// ── GET /api/import/deposits ─────────────────────────────
+router.get("/deposits", (req, res) => {
+  try {
+    const db   = getDb(req.session.user.username);
+    const rows = db.prepare("SELECT * FROM depositos ORDER BY data DESC").all();
+    res.json(rows);
+  } catch {
+    res.json([]);
   }
 });
 

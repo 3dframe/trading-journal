@@ -92,11 +92,52 @@ router.post("/logout", (req, res) => {
 router.get("/me", (req, res) => {
   if (!req.session.user)
     return res.status(401).json({ error: "Não autenticado." });
+  const users = loadUsers();
+  const user  = users.find(u => u.username === req.session.user.username);
   res.json({
-    username: req.session.user.username,
-    fullName: req.session.user.fullName || req.session.user.username,
-    isAdmin:  !!req.session.user.isAdmin,
+    username:  req.session.user.username,
+    fullName:  req.session.user.fullName || req.session.user.username,
+    isAdmin:   !!req.session.user.isAdmin,
+    lastLogin: user?.lastLogin || null,
   });
+});
+
+// PATCH /api/auth/me — update fullName
+router.patch("/me", (req, res) => {
+  if (!req.session.user) return res.status(401).json({ error: "Não autenticado." });
+  const { fullName } = req.body;
+  if (!fullName?.trim()) return res.status(400).json({ error: "Nome não pode estar vazio." });
+
+  const users = loadUsers();
+  const user  = users.find(u => u.username === req.session.user.username);
+  if (!user) return res.status(404).json({ error: "Utilizador não encontrado." });
+
+  user.fullName = fullName.trim();
+  saveUsers(users);
+  req.session.user.fullName = fullName.trim();
+  res.json({ ok: true, fullName: fullName.trim() });
+});
+
+// POST /api/auth/change-password
+router.post("/change-password", async (req, res) => {
+  if (!req.session.user) return res.status(401).json({ error: "Não autenticado." });
+  const { currentPassword, newPassword } = req.body;
+  if (!currentPassword || !newPassword)
+    return res.status(400).json({ error: "Preenche todos os campos." });
+  if (newPassword.length < 6)
+    return res.status(400).json({ error: "A nova password deve ter pelo menos 6 caracteres." });
+
+  const users = loadUsers();
+  const user  = users.find(u => u.username === req.session.user.username);
+  if (!user) return res.status(404).json({ error: "Utilizador não encontrado." });
+
+  const ok = await bcrypt.compare(currentPassword, user.passwordHash);
+  if (!ok) return res.status(401).json({ error: "Password actual incorrecta." });
+
+  user.passwordHash = await bcrypt.hash(newPassword, 12);
+  saveUsers(users);
+  appendLog({ username: user.username, action: "change_password", timestamp: new Date().toISOString(), ip: req.ip });
+  res.json({ ok: true });
 });
 
 module.exports = router;
