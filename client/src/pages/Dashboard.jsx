@@ -362,52 +362,80 @@ export default function Dashboard({ user }) {
       {/* ── Middle row: Summary + Donuts ── */}
       <div style={{ display: "grid", gridTemplateColumns: "3fr 2fr", gap: 16, marginBottom: 20 }}>
 
-        {/* Left: Total Acumulado + P&L por Semana inline */}
-        <div className="card" style={{ padding: 24 }}>
-          <div style={{ fontWeight: 700, fontSize: "1rem", color: "var(--text)", marginBottom: 2 }}>Total Acumulado</div>
-          <div style={{ fontSize: "0.72rem", color: MUTE, marginBottom: 20 }}>
-            {new Date().toLocaleDateString("pt-PT", { day: "numeric", month: "long", year: "numeric" })}
-          </div>
+        {/* Left: Total Acumulado — two-column layout */}
+        <div className="card" style={{ padding: 24, display: "flex", gap: 24 }}>
 
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: "0.64rem", color: MUTE, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 6 }}>Este Ano</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ fontSize: "2.1rem", fontWeight: 800, letterSpacing: "-1px", color: totalIncome >= 0 ? GREEN : RED }}>
+          {/* Info column */}
+          <div style={{ width: 210, flexShrink: 0, display: "flex", flexDirection: "column" }}>
+            <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "var(--text)", marginBottom: 2 }}>Total Acumulado</div>
+            <div style={{ fontSize: "0.72rem", color: MUTE, marginBottom: 20 }}>
+              {new Date().toLocaleDateString("pt-PT", { day: "numeric", month: "long", year: "numeric" })}
+            </div>
+
+            <div style={{ marginBottom: 22 }}>
+              <div style={{ fontSize: "0.64rem", color: MUTE, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 6 }}>Este Ano</div>
+              <div style={{ fontSize: "1.55rem", fontWeight: 800, letterSpacing: "-0.5px", color: totalIncome >= 0 ? GREEN : RED, marginBottom: 7 }}>
                 {totalIncome >= 0 ? "+" : ""}{fmtAbs(totalIncome)}
               </div>
-              <Tip text={`Profit Factor: rácio entre ganhos e perdas totais.\nValor acima de 1 significa estratégia lucrativa.`}>
+              <Tip text={"Profit Factor: rácio entre ganhos e perdas totais.\nValor acima de 1 significa estratégia lucrativa."}>
                 <span style={{ background: pf >= 1 ? "rgba(16,185,129,0.12)" : "rgba(244,63,94,0.12)", color: pf >= 1 ? GREEN : RED, fontSize: "0.7rem", fontWeight: 700, padding: "3px 9px", borderRadius: 12, cursor: "help" }}>
                   {pf.toFixed(2)}x PF
                 </span>
               </Tip>
             </div>
+
+            {/* Melhor Dia */}
+            <div onClick={openBestDay} style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10, padding: "10px 12px", borderRadius: 10, background: "rgba(16,185,129,0.07)", border: "1px solid rgba(16,185,129,0.18)", cursor: "pointer", transition: "background .2s" }}
+              onMouseEnter={e => e.currentTarget.style.background = "rgba(16,185,129,0.14)"}
+              onMouseLeave={e => e.currentTarget.style.background = "rgba(16,185,129,0.07)"}>
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: GREEN, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
+                  <polyline points="17 6 23 6 23 12"/>
+                </svg>
+              </div>
+              <div>
+                <div style={{ fontSize: "0.68rem", color: GREEN, fontWeight: 700, marginBottom: 2 }}>Melhor Dia</div>
+                <div style={{ fontSize: "0.95rem", fontWeight: 800, color: "var(--text)" }}>{fmt(stats.best_day ?? 0)}</div>
+                <div style={{ fontSize: "0.62rem", color: MUTE, marginTop: 1 }}>{stats.best_day_date ?? "—"}</div>
+              </div>
+            </div>
+
+            {/* Pior Dia */}
+            <div onClick={openWorstDay} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", borderRadius: 10, background: "rgba(244,63,94,0.07)", border: "1px solid rgba(244,63,94,0.18)", cursor: "pointer", transition: "background .2s" }}
+              onMouseEnter={e => e.currentTarget.style.background = "rgba(244,63,94,0.14)"}
+              onMouseLeave={e => e.currentTarget.style.background = "rgba(244,63,94,0.07)"}>
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: RED, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/>
+                  <polyline points="17 18 23 18 23 12"/>
+                </svg>
+              </div>
+              <div>
+                <div style={{ fontSize: "0.68rem", color: RED, fontWeight: 700, marginBottom: 2 }}>Pior Dia</div>
+                <div style={{ fontSize: "0.95rem", fontWeight: 800, color: "var(--text)" }}>{fmt(stats.worst_day ?? 0)}</div>
+                <div style={{ fontSize: "0.62rem", color: MUTE, marginTop: 1 }}>{stats.worst_day_date ?? "—"}</div>
+              </div>
+            </div>
           </div>
 
-          <div style={{ display: "flex", gap: 12, marginBottom: 24 }}>
-            <div onClick={openBestDay} {...hoverGreen} style={{ flex: 1, background: "rgba(16,185,129,0.07)", borderRadius: 10, padding: "12px 14px", border: "1px solid rgba(16,185,129,0.18)", cursor: "pointer", transition: "background .2s" }}>
-              <div style={{ fontSize: "0.6rem", color: GREEN, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 5 }}>Melhor Dia</div>
-              <div style={{ fontSize: "1rem", fontWeight: 700, color: GREEN }}>{fmt(stats.best_day ?? 0)}</div>
-              <div style={{ fontSize: "0.64rem", color: MUTE, marginTop: 2 }}>{stats.best_day_date ?? "—"}</div>
-            </div>
-            <div onClick={openWorstDay} {...hoverRed} style={{ flex: 1, background: "rgba(244,63,94,0.07)", borderRadius: 10, padding: "12px 14px", border: "1px solid rgba(244,63,94,0.18)", cursor: "pointer", transition: "background .2s" }}>
-              <div style={{ fontSize: "0.6rem", color: RED, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 5 }}>Pior Dia</div>
-              <div style={{ fontSize: "1rem", fontWeight: 700, color: RED }}>{fmt(stats.worst_day ?? 0)}</div>
-              <div style={{ fontSize: "0.64rem", color: MUTE, marginTop: 2 }}>{stats.worst_day_date ?? "—"}</div>
+          {/* Chart column */}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+            <div style={{ fontSize: "0.6rem", fontWeight: 700, color: MUTE, textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 10 }}>P&L por Semana</div>
+            <div style={{ flex: 1 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={weekly} barSize={10}>
+                  <XAxis dataKey="semana" tick={{ fill: MUTE, fontSize: 9 }} tickFormatter={s => s?.slice(5)} interval="preserveStartEnd" axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: MUTE, fontSize: 9 }} tickFormatter={v => `€${v}`} width={46} axisLine={false} tickLine={false} />
+                  <Tooltip content={<TooltipDark />} />
+                  <ReferenceLine y={0} stroke="rgba(255,255,255,0.1)" />
+                  <Bar dataKey="pl" radius={[3,3,0,0]}>
+                    {weekly.map((w, i) => <Cell key={i} fill={w.pl >= 0 ? GREEN : RED} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
             </div>
           </div>
-
-          <div style={{ fontSize: "0.6rem", fontWeight: 700, color: MUTE, textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 10 }}>P&L por Semana</div>
-          <ResponsiveContainer width="100%" height={130}>
-            <BarChart data={weekly} barSize={9}>
-              <XAxis dataKey="semana" tick={{ fill: MUTE, fontSize: 9 }} tickFormatter={s => s?.slice(5)} interval="preserveStartEnd" axisLine={false} tickLine={false} />
-              <YAxis hide />
-              <Tooltip content={<TooltipDark />} />
-              <ReferenceLine y={0} stroke="rgba(255,255,255,0.1)" />
-              <Bar dataKey="pl" radius={[3,3,0,0]}>
-                {weekly.map((w, i) => <Cell key={i} fill={w.pl >= 0 ? GREEN : RED} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
         </div>
 
         {/* Right: 4 mini donuts */}
