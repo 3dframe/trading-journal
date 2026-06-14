@@ -73,8 +73,25 @@ function initSchema(db) {
   try { db.exec("ALTER TABLE trades ADD COLUMN pais TEXT"); } catch {}
   try { db.exec("ALTER TABLE trades ADD COLUMN conta TEXT"); } catch {}
 
-  // Migration: consolidate 'tipo' column (from new imports) into 'tipo_ordem' (original Python column)
+  // Migration: garantir que a coluna tipo_ordem existe (bases novas não a têm no CREATE TABLE)
+  try { db.exec("ALTER TABLE trades ADD COLUMN tipo_ordem TEXT"); } catch {}
+  // Copiar 'tipo' → 'tipo_ordem' para bases vindas do Python
   try { db.exec("UPDATE trades SET tipo_ordem = tipo WHERE tipo_ordem IS NULL AND tipo IS NOT NULL"); } catch {}
+
+  // Migrations: campos para IRS fiscal e câmbio
+  try { db.exec("ALTER TABLE trades ADD COLUMN swap        REAL"); } catch {}
+  try { db.exec("ALTER TABLE trades ADD COLUMN rollover    REAL"); } catch {}
+  try { db.exec("ALTER TABLE trades ADD COLUMN gross_pl    REAL"); } catch {}
+  try { db.exec("ALTER TABLE trades ADD COLUMN taxa_cambio REAL"); } catch {}
+  try { db.exec("ALTER TABLE dividendos ADD COLUMN tipo TEXT DEFAULT 'DIVIDEND'"); } catch {}
+
+  // Migrations: campos completos do CLOSED POSITION HISTORY (XTB/IBKR)
+  try { db.exec("ALTER TABLE trades ADD COLUMN preco_abertura REAL"); } catch {}
+  try { db.exec("ALTER TABLE trades ADD COLUMN preco_fecho    REAL"); } catch {}
+  try { db.exec("ALTER TABLE trades ADD COLUMN sl             REAL"); } catch {}
+  try { db.exec("ALTER TABLE trades ADD COLUMN tp             REAL"); } catch {}
+  try { db.exec("ALTER TABLE trades ADD COLUMN margin         REAL"); } catch {}
+  try { db.exec("ALTER TABLE trades ADD COLUMN comment        TEXT"); } catch {}
 
   // 3. Índices únicos (só depois de garantir que as colunas existem)
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_ref

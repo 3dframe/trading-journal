@@ -5,6 +5,116 @@ const fmt = v => (v >= 0 ? "+" : "") + "€ " + Math.abs(v).toLocaleString("pt-P
 const fmtE = v => "€ " + Math.abs(v).toLocaleString("pt-PT", { minimumFractionDigits: 2 });
 const GREEN = "#10b981", RED = "#f43f5e", BLUE = "#4f6af5", MUTE = "#4e6080";
 
+const fmtN  = (v, dec = 2) => v != null && v !== 0 ? Number(v).toFixed(dec) : "—";
+const fmtEu = v => v != null && v !== 0 ? `€ ${Math.abs(Number(v)).toLocaleString("pt-PT", { minimumFractionDigits: 2 })}` : "—";
+const fmtDT = v => v ? String(v).slice(0, 19).replace("T", " ") : "—";
+
+function Field({ label, value, color }) {
+  return (
+    <div>
+      <div style={{ color: MUTE, textTransform: "uppercase", fontSize: 9.5, letterSpacing: ".07em", marginBottom: 3 }}>
+        {label}
+      </div>
+      <div style={{ color: color || "var(--text)", fontWeight: color ? 700 : 400, fontSize: 12.5 }}>
+        {value ?? "—"}
+      </div>
+    </div>
+  );
+}
+
+function Section({ title, children }) {
+  return (
+    <div>
+      <div style={{
+        fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em",
+        color: BLUE, borderBottom: `1px solid var(--border)`, paddingBottom: 4, marginBottom: 10,
+      }}>{title}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: "10px 16px" }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function TradeDetail({ t }) {
+  const hasPrices  = t.preco_abertura || t.preco_fecho;
+  const hasRisk    = t.sl || t.tp || t.margin;
+  const hasSwap    = t.swap || t.rollover || t.gross_pl;
+  const hasComment = t.comment;
+
+  return (
+    <div style={{
+      background: "var(--hover)", border: "1px solid var(--border)", borderTop: "none",
+      borderRadius: "0 0 10px 10px", padding: "16px 20px", marginBottom: 6,
+      display: "flex", flexDirection: "column", gap: 16, fontSize: 12,
+    }}>
+      {/* ── Identificação ── */}
+      <Section title="Identificação">
+        <Field label="Posição / Ref"   value={t.ref_externa} />
+        <Field label="Símbolo"         value={t.simbolo} />
+        <Field label="Tipo de Ordem"   value={t.tipo_ordem} />
+        <Field label="Categoria"       value={t.categoria} />
+        <Field label="Corretora"       value={t.corretora} />
+        <Field label="Conta"           value={t.conta} />
+        <Field label="País"            value={t.pais} />
+        <Field label="Moeda Original"  value={t.moeda_original} />
+        {t.taxa_cambio && t.taxa_cambio !== 1 &&
+          <Field label="Taxa Câmbio" value={`× ${Number(t.taxa_cambio).toFixed(4)}`} />}
+      </Section>
+
+      {/* ── Datas ── */}
+      <Section title="Datas">
+        <Field label="Data/Hora Abertura" value={fmtDT(t.data_abertura)} />
+        <Field label="Data/Hora Fecho"    value={fmtDT(t.data_fecho)} />
+      </Section>
+
+      {/* ── Preços e Volume ── */}
+      {(hasPrices || t.volume) && (
+        <Section title="Preços e Volume">
+          <Field label="Volume"         value={fmtN(t.volume, 4)} />
+          {hasPrices && <Field label="Preço Abertura" value={fmtN(t.preco_abertura, 5)} />}
+          {hasPrices && <Field label="Preço Fecho"    value={fmtN(t.preco_fecho, 5)} />}
+        </Section>
+      )}
+
+      {/* ── Valores de Negociação ── */}
+      <Section title="Valores de Negociação">
+        <Field label="Purchase Value"  value={fmtEu(t.valor_compra_eur)} />
+        <Field label="Sale Value"      value={fmtEu(t.valor_venda_eur)} />
+        <Field label="Comissão"        value={fmtEu(t.fees)} />
+        {hasSwap && <Field label="Swap"     value={fmtEu(t.swap)} />}
+        {hasSwap && <Field label="Rollover" value={fmtEu(t.rollover)} />}
+        {hasSwap && <Field label="Gross P/L" value={fmtEu(t.gross_pl)} />}
+      </Section>
+
+      {/* ── Risco (SL/TP/Margem) ── */}
+      {hasRisk && (
+        <Section title="Gestão de Risco">
+          <Field label="Stop Loss (SL)"  value={fmtN(t.sl, 5)} />
+          <Field label="Take Profit (TP)" value={fmtN(t.tp, 5)} />
+          <Field label="Margem"          value={fmtEu(t.margin)} />
+        </Section>
+      )}
+
+      {/* ── Resultado ── */}
+      <Section title="Resultado">
+        <Field label="Net P/L" value={fmt(t.pl_eur)} color={t.pl_eur >= 0 ? GREEN : RED} />
+      </Section>
+
+      {/* ── Comentário ── */}
+      {hasComment && (
+        <div>
+          <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em",
+            color: BLUE, borderBottom: "1px solid var(--border)", paddingBottom: 4, marginBottom: 8 }}>
+            Comentário
+          </div>
+          <div style={{ fontSize: 12, color: "var(--text)", fontStyle: "italic" }}>{t.comment}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function TradeLog() {
   const [trades, setTrades]     = useState([]);
   const [divs, setDivs]         = useState([]);
@@ -157,36 +267,7 @@ export default function TradeLog() {
                 <span style={{ color: MUTE, marginLeft: 8 }}>{expanded === key ? "▲" : "▼"}</span>
               </div>
               {expanded === key && (
-                <div style={{ background:"var(--hover)", border:"1px solid var(--border)", borderTop:"none",
-                              borderRadius:"0 0 8px 8px", padding:"14px 20px", marginBottom:6,
-                              display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:"10px 20px",
-                              fontSize:12 }}>
-                  {[
-                    ["Corretora",       t.corretora],
-                    ["Conta",           t.conta],
-                    ["Abertura",        t.data_abertura?.slice(0,19)?.replace("T"," ")],
-                    ["Fecho",           t.data_fecho?.slice(0,19)?.replace("T"," ")],
-                    ["Volume",          t.volume],
-                    ["Preço Abertura",  t.preco_abertura ? `€ ${t.preco_abertura}` : "—"],
-                    ["Preço Fecho",     t.preco_fecho ? `€ ${t.preco_fecho}` : "—"],
-                    ["Valor Compra",    t.valor_compra_eur ? `€ ${Number(t.valor_compra_eur).toFixed(2)}` : "—"],
-                    ["Valor Venda",     t.valor_venda_eur ? `€ ${Number(t.valor_venda_eur).toFixed(2)}` : "—"],
-                    ["Comissão",        t.comissao_eur ? `€ ${Number(t.comissao_eur).toFixed(2)}` : "—"],
-                    ["Moeda",           t.moeda_original],
-                    ["País",            t.pais],
-                  ].map(([k, v]) => (
-                    <div key={k}>
-                      <div style={{ color: MUTE, textTransform:"uppercase", fontSize:10, letterSpacing:".06em" }}>{k}</div>
-                      <div style={{ color: "var(--text)", marginTop:2 }}>{v ?? "—"}</div>
-                    </div>
-                  ))}
-                  {t.pl_eur !== null && (
-                    <div>
-                      <div style={{ color: MUTE, textTransform:"uppercase", fontSize:10, letterSpacing:".06em" }}>P&L</div>
-                      <div style={{ color: t.pl_eur >= 0 ? GREEN : RED, fontWeight:700, marginTop:2 }}>{fmt(t.pl_eur)}</div>
-                    </div>
-                  )}
-                </div>
+                <TradeDetail t={t} />
               )}
             </div>
           );
