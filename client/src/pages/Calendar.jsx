@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import axios from "axios";
 
 // ── Constantes ─────────────────────────────────────────────────
@@ -11,17 +11,16 @@ const WEEKDAYS     = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"];
 const G   = "#10b981";
 const R   = "#f43f5e";
 const B   = "#4f6af5";
-const T   = "#14b8a6";   // hoje — borda teal
+const T   = "#14b8a6";
 const MUT = "var(--mute)";
 
 const fmtPL  = v => (v >= 0 ? "+" : "−") + "€ " + Math.abs(v).toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtPct = v => v.toFixed(0) + "%";
 
-// Número da semana ISO 8601 (semana começa na segunda-feira)
 function isoWeek(year, month, day) {
   const d = new Date(Date.UTC(year, month - 1, day));
-  const dow = d.getUTCDay() || 7;          // domingo=7
-  d.setUTCDate(d.getUTCDate() + 4 - dow);  // quinta-feira da semana
+  const dow = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dow);
   const jan1 = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
   return Math.ceil((((d - jan1) / 86400000) + 1) / 7);
 }
@@ -37,18 +36,18 @@ const COUNTRY_NAME = {
 function TradeDetail({ t }) {
   const fmtPais = code => COUNTRY_NAME[code] || code || null;
   const fields = [
-    ["Corretora",      t.corretora],
-    ["Conta",          t.conta],
-    ["Abertura",       t.data_abertura?.slice(0,19)?.replace("T"," ")],
-    ["Fecho",          t.data_fecho?.slice(0,19)?.replace("T"," ")],
-    ["Volume",         t.volume],
-    ["Preço Ab.",      t.preco_abertura != null ? `€ ${Number(t.preco_abertura).toFixed(4)}` : null],
-    ["Preço Fecho",    t.preco_fecho    != null ? `€ ${Number(t.preco_fecho).toFixed(4)}`    : null],
-    ["Moeda",          t.moeda_original],
-    ["Valor Compra",   t.valor_compra_eur != null ? `€ ${Number(t.valor_compra_eur).toFixed(2)}` : null],
-    ["Valor Venda",    t.valor_venda_eur  != null ? `€ ${Number(t.valor_venda_eur).toFixed(2)}`  : null],
-    ["Comissão",       t.fees             != null ? `€ ${Number(t.fees).toFixed(2)}`             : null],
-    ["País",           fmtPais(t.pais)],
+    ["Corretora",    t.corretora],
+    ["Conta",        t.conta],
+    ["Abertura",     t.data_abertura?.slice(0,19)?.replace("T"," ")],
+    ["Fecho",        t.data_fecho?.slice(0,19)?.replace("T"," ")],
+    ["Volume",       t.volume],
+    ["Preço Ab.",    t.preco_abertura != null ? `€ ${Number(t.preco_abertura).toFixed(4)}` : null],
+    ["Preço Fecho",  t.preco_fecho    != null ? `€ ${Number(t.preco_fecho).toFixed(4)}`    : null],
+    ["Moeda",        t.moeda_original],
+    ["Valor Compra", t.valor_compra_eur != null ? `€ ${Number(t.valor_compra_eur).toFixed(2)}` : null],
+    ["Valor Venda",  t.valor_venda_eur  != null ? `€ ${Number(t.valor_venda_eur).toFixed(2)}`  : null],
+    ["Comissão",     t.fees             != null ? `€ ${Number(t.fees).toFixed(2)}`             : null],
+    ["País",         fmtPais(t.pais)],
   ].filter(([, v]) => v != null && v !== "");
 
   const pl = t.pl_eur ?? 0;
@@ -76,12 +75,12 @@ function TradeDetail({ t }) {
 // ── Barra de estatísticas ───────────────────────────────────────
 function StatsBar({ stats }) {
   const items = [
-    { label: "NET P&L",    value: fmtPL(stats.netPL),    color: stats.netPL   >= 0 ? G : R },
-    { label: "GROSS P&L",  value: fmtPL(stats.grossPL),  color: stats.grossPL >= 0 ? G : R },
-    { label: "COMISSÕES",  value: stats.fees > 0 ? "−€ " + stats.fees.toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "€ 0,00", color: stats.fees > 0 ? R : MUT },
-    { label: "DIAS +",     value: stats.winDays,          color: "var(--text)" },
-    { label: "TRADES",     value: stats.trades,           color: "var(--text)" },
-    { label: "WIN RATE",   value: fmtPct(stats.winRate),  color: stats.winRate >= 50 ? G : R },
+    { label: "NET P&L",   value: fmtPL(stats.netPL),   color: stats.netPL   >= 0 ? G : R },
+    { label: "GROSS P&L", value: fmtPL(stats.grossPL), color: stats.grossPL >= 0 ? G : R },
+    { label: "COMISSÕES", value: stats.fees > 0 ? "−€ " + stats.fees.toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "€ 0,00", color: stats.fees > 0 ? R : MUT },
+    { label: "DIAS +",    value: stats.winDays,         color: "var(--text)" },
+    { label: "TRADES",    value: stats.trades,          color: "var(--text)" },
+    { label: "WIN RATE",  value: fmtPct(stats.winRate), color: stats.winRate >= 50 ? G : R },
   ];
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 1, background: "var(--border)", borderRadius: 10, overflow: "hidden", marginBottom: 20, border: "1px solid var(--border)" }}>
@@ -95,8 +94,54 @@ function StatsBar({ stats }) {
   );
 }
 
+// ── Painel de trades (dia ou mês) ──────────────────────────────
+function TradesPanel({ title, trades, expanded, onExpand, panelRef }) {
+  return (
+    <div ref={panelRef} style={{ marginTop: 20 }}>
+      <div style={{ fontSize: "0.7rem", fontWeight: 700, color: MUT, textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 10 }}>
+        {title} · {trades.length} trade{trades.length !== 1 ? "s" : ""}
+      </div>
+      <table className="data-table">
+        <thead><tr>
+          <th>Símbolo</th><th>Categoria</th><th>Corretora</th>
+          <th>Abertura</th><th>Fecho</th><th style={{ textAlign: "right" }}>P&amp;L €</th>
+        </tr></thead>
+        <tbody>
+          {trades.map(t => {
+            const isOpen = expanded === t.id;
+            const pl     = t.pl_eur ?? 0;
+            return (
+              <Fragment key={t.id}>
+                <tr style={{ cursor: "pointer", background: isOpen ? "rgba(255,255,255,0.03)" : undefined }}
+                  onClick={() => onExpand(t.id)}>
+                  <td style={{ fontWeight: 700, color: "var(--text)" }}>
+                    <span style={{ marginRight: 6, fontSize: 10, opacity: .5 }}>{isOpen ? "▲" : "▼"}</span>
+                    {t.simbolo}
+                  </td>
+                  <td style={{ color: t.categoria === "CFD" ? R : undefined, fontWeight: t.categoria === "CFD" ? 700 : undefined }}>{t.categoria}</td>
+                  <td>{t.corretora}</td>
+                  <td style={{ fontSize: 11 }}>{t.data_abertura?.slice(0,19)?.replace("T"," ")}</td>
+                  <td style={{ fontSize: 11 }}>{t.data_fecho?.slice(0,19)?.replace("T"," ")}</td>
+                  <td style={{ textAlign: "right", fontWeight: 700, color: pl >= 0 ? G : R }}>{fmtPL(pl)}</td>
+                </tr>
+                {isOpen && (
+                  <tr>
+                    <td colSpan={6} style={{ padding: "0 0 12px", background: "rgba(255,255,255,0.02)" }}>
+                      <TradeDetail t={t} />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ── Vista de Ano ────────────────────────────────────────────────
-function YearView({ ano, setAno, yearData, onSelectMonth }) {
+function YearView({ ano, setAno, yearData, selectedMonth, onMonthClick }) {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
@@ -106,17 +151,22 @@ function YearView({ ano, setAno, yearData, onSelectMonth }) {
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
         {MONTHS_SHORT.map((m, i) => {
-          const d = yearData[i + 1] || {};
-          const pl = d.pl || 0;
+          const mNum = i + 1;
+          const d    = yearData[mNum] || {};
+          const pl   = d.pl || 0;
+          const isSel = selectedMonth === mNum;
           return (
-            <div key={i} onClick={() => onSelectMonth(i + 1)}
-              style={{ background: pl > 0 ? "rgba(16,185,129,0.07)" : pl < 0 ? "rgba(244,63,94,0.07)" : "var(--card)",
-                border: `1px solid ${pl > 0 ? "rgba(16,185,129,0.35)" : pl < 0 ? "rgba(244,63,94,0.3)" : "var(--border)"}`,
-                borderRadius: 10, padding: "16px 14px", cursor: "pointer",
-                transition: "border-color .2s" }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = pl > 0 ? G : pl < 0 ? R : "rgba(255,255,255,0.2)"; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = pl > 0 ? "rgba(16,185,129,0.35)" : pl < 0 ? "rgba(244,63,94,0.3)" : "var(--border)"; }}>
-              <div style={{ fontSize: "0.7rem", fontWeight: 700, color: MUT, textTransform: "uppercase", marginBottom: 8 }}>{m}</div>
+            <div key={i} onClick={() => d.trades && onMonthClick(mNum)}
+              style={{
+                background: isSel ? "rgba(79,106,245,0.12)" : pl > 0 ? "rgba(16,185,129,0.07)" : pl < 0 ? "rgba(244,63,94,0.07)" : "var(--card)",
+                border: `${isSel ? 2 : 1}px solid ${isSel ? B : pl > 0 ? "rgba(16,185,129,0.35)" : pl < 0 ? "rgba(244,63,94,0.3)" : "var(--border)"}`,
+                borderRadius: 10, padding: "16px 14px",
+                cursor: d.trades ? "pointer" : "default",
+                transition: "border-color .2s",
+              }}
+              onMouseEnter={e => { if (d.trades) e.currentTarget.style.borderColor = pl > 0 ? G : pl < 0 ? R : "rgba(255,255,255,0.2)"; }}
+              onMouseLeave={e => { if (d.trades) e.currentTarget.style.borderColor = isSel ? B : pl > 0 ? "rgba(16,185,129,0.35)" : pl < 0 ? "rgba(244,63,94,0.3)" : "var(--border)"; }}>
+              <div style={{ fontSize: "0.7rem", fontWeight: 700, color: isSel ? B : MUT, textTransform: "uppercase", marginBottom: 8 }}>{m}</div>
               {d.trades ? (
                 <>
                   <div style={{ fontWeight: 800, fontSize: "1.05rem", color: pl >= 0 ? G : R }}>{fmtPL(pl)}</div>
@@ -134,20 +184,17 @@ function YearView({ ano, setAno, yearData, onSelectMonth }) {
 }
 
 // ── Vista de Semana ─────────────────────────────────────────────
-function WeekView({ ano, mes, weekOffset, setWeekOffset, calData, onSelectDay, selected, dayTrades, expanded, onExpand }) {
-  const today = new Date();
+function WeekView({ weekOffset, setWeekOffset, calData, onSelectDay, selected }) {
+  const today    = new Date();
   const todayStr = today.toISOString().slice(0, 10);
-
-  // Calcular início da semana actual (domingo)
   const baseDate = new Date(today);
   baseDate.setDate(today.getDate() - today.getDay() + weekOffset * 7);
 
-  const weekDays = Array.from({ length: 7 }, (_, i) => {
+  const weekDays  = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(baseDate);
     d.setDate(baseDate.getDate() + i);
     return d;
   });
-
   const weekStart = weekDays[0];
   const weekEnd   = weekDays[6];
   const fmtDate   = d => `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
@@ -159,9 +206,7 @@ function WeekView({ ano, mes, weekOffset, setWeekOffset, calData, onSelectDay, s
         <span style={{ color: "var(--text)", fontWeight: 600, fontSize: "0.9rem" }}>
           {fmtDate(weekStart)} – {fmtDate(weekEnd)} {weekEnd.getFullYear()}
         </span>
-        <span style={{ fontSize: "0.7rem", fontWeight: 700, color: MUT,
-          background: "var(--card)", border: "1px solid var(--border)",
-          borderRadius: 5, padding: "2px 8px" }}>
+        <span style={{ fontSize: "0.7rem", fontWeight: 700, color: MUT, background: "var(--card)", border: "1px solid var(--border)", borderRadius: 5, padding: "2px 8px" }}>
           S{isoWeek(weekStart.getFullYear(), weekStart.getMonth() + 1, weekStart.getDate())}
         </span>
         <button onClick={() => setWeekOffset(o => o + 1)} style={navBtnStyle}>›</button>
@@ -174,8 +219,8 @@ function WeekView({ ano, mes, weekOffset, setWeekOffset, calData, onSelectDay, s
           <div key={d} style={{ textAlign: "center", fontSize: "0.65rem", fontWeight: 700, color: MUT, textTransform: "uppercase", letterSpacing: ".08em", paddingBottom: 8 }}>{d}</div>
         ))}
         {weekDays.map(d => {
-          const ds   = d.toISOString().slice(0, 10);
-          const data = calData[ds];
+          const ds      = d.toISOString().slice(0, 10);
+          const data    = calData[ds];
           const isToday = ds === todayStr;
           const isSel   = selected === ds;
           return (
@@ -201,55 +246,6 @@ function WeekView({ ano, mes, weekOffset, setWeekOffset, calData, onSelectDay, s
           );
         })}
       </div>
-      {selected && dayTrades.length > 0 && (
-        <DayTradesPanel selected={selected} dayTrades={dayTrades} expanded={expanded} onExpand={onExpand} />
-      )}
-    </div>
-  );
-}
-
-// ── Painel de trades do dia ────────────────────────────────────
-function DayTradesPanel({ selected, dayTrades, expanded, onExpand }) {
-  return (
-    <div style={{ marginTop: 20 }}>
-      <div style={{ fontSize: "0.7rem", fontWeight: 700, color: MUT, textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 10 }}>
-        {selected} · {dayTrades.length} trade{dayTrades.length !== 1 ? "s" : ""}
-      </div>
-      <table className="data-table">
-        <thead><tr>
-          <th>Símbolo</th><th>Categoria</th><th>Corretora</th>
-          <th>Abertura</th><th>Fecho</th><th style={{ textAlign: "right" }}>P&amp;L €</th>
-        </tr></thead>
-        <tbody>
-          {dayTrades.map(t => {
-            const isOpen = expanded === t.id;
-            const pl     = t.pl_eur ?? 0;
-            return (
-              <>
-                <tr key={t.id} style={{ cursor: "pointer", background: isOpen ? "rgba(255,255,255,0.03)" : undefined }}
-                  onClick={() => onExpand(t.id)}>
-                  <td style={{ fontWeight: 700, color: "var(--text)" }}>
-                    <span style={{ marginRight: 6, fontSize: 10, opacity: .5 }}>{isOpen ? "▲" : "▼"}</span>
-                    {t.simbolo}
-                  </td>
-                  <td style={{ color: t.categoria === "CFD" ? R : undefined, fontWeight: t.categoria === "CFD" ? 700 : undefined }}>{t.categoria}</td>
-                  <td>{t.corretora}</td>
-                  <td style={{ fontSize: 11 }}>{t.data_abertura?.slice(0,19)?.replace("T"," ")}</td>
-                  <td style={{ fontSize: 11 }}>{t.data_fecho?.slice(0,19)?.replace("T"," ")}</td>
-                  <td style={{ textAlign: "right", fontWeight: 700, color: pl >= 0 ? G : R }}>{fmtPL(pl)}</td>
-                </tr>
-                {isOpen && (
-                  <tr key={`${t.id}-d`}>
-                    <td colSpan={6} style={{ padding: "0 0 12px", background: "rgba(255,255,255,0.02)" }}>
-                      <TradeDetail t={t} />
-                    </td>
-                  </tr>
-                )}
-              </>
-            );
-          })}
-        </tbody>
-      </table>
     </div>
   );
 }
@@ -266,37 +262,70 @@ const navBtnStyle = {
 // COMPONENTE PRINCIPAL
 // ══════════════════════════════════════════════════════════════
 export default function Calendar() {
-  const now = new Date();
+  const now      = new Date();
   const todayStr = now.toISOString().slice(0, 10);
 
-  const [view,       setView]       = useState("month");
-  const [ano,        setAno]        = useState(now.getFullYear());
-  const [mes,        setMes]        = useState(now.getMonth() + 1);
-  const [weekOffset, setWeekOffset] = useState(0);
-  const [calData,    setCalData]    = useState({});
-  const [yearData,   setYearData]   = useState({});
-  const [monthTrades,setMonthTrades]= useState([]);
-  const [selected,   setSelected]   = useState(null);
-  const [dayTrades,  setDayTrades]  = useState([]);
-  const [expanded,   setExpanded]   = useState(null);
+  const [view,          setView]          = useState("month");
+  const [ano,           setAno]           = useState(now.getFullYear());
+  const [mes,           setMes]           = useState(now.getMonth() + 1);
+  const [weekOffset,    setWeekOffset]    = useState(0);
+  const [calData,       setCalData]       = useState({});
+  const [yearData,      setYearData]      = useState({});
+  const [yearTrades,    setYearTrades]    = useState([]);
+  const [selected,      setSelected]      = useState(null);   // dia selecionado (vista mês/semana)
+  const [selectedMonth, setSelectedMonth] = useState(null);   // mês selecionado (vista ano)
+  const [shownTrades,   setShownTrades]   = useState([]);
+  const [expanded,      setExpanded]      = useState(null);
+  const [initialized,   setInitialized]   = useState(false);
 
-  // ── Grelha do mês ──
+  const panelRef = useRef(null);
+
+  // ── Na abertura: ir para o ano mais recente com dados ──
+  useEffect(() => {
+    axios.get("/api/trades/anos").then(r => {
+      if (r.data.length) setAno(r.data[0]);
+    }).catch(() => {});
+  }, []);
+
+  // ── Quando yearData carrega pela primeira vez, saltar para o último mês com dados ──
+  useEffect(() => {
+    if (initialized) return;
+    const months = Object.keys(yearData).map(Number).filter(m => yearData[m]?.trades > 0);
+    if (!months.length) return;
+    setMes(Math.max(...months));
+    setInitialized(true);
+  }, [yearData, initialized]);
+
+  // ── Reset de seleção quando o ano muda ──
+  useEffect(() => {
+    setSelected(null);
+    setSelectedMonth(null);
+    setShownTrades([]);
+    setExpanded(null);
+  }, [ano]);
+
+  // ── Grelha do mês (com abort para evitar race conditions) ──
   useEffect(() => {
     if (view === "year") return;
+    let ignore = false;
     axios.get(`/api/trades/calendar?ano=${ano}&mes=${mes}`)
       .then(r => {
+        if (ignore) return;
         const map = {};
         r.data.forEach(d => { map[d.dia] = d; });
         setCalData(map);
         setSelected(null);
-        setDayTrades([]);
+        setShownTrades([]);
       }).catch(() => {});
+    return () => { ignore = true; };
   }, [ano, mes, view]);
 
-  // ── Dados anuais + stats mensais ──
+  // ── Trades do ano (com abort) ──
   useEffect(() => {
+    let ignore = false;
     axios.get(`/api/trades?ano=${ano}`)
       .then(r => {
+        if (ignore) return;
         const byMonth = {};
         r.data.forEach(t => {
           const m = parseInt(t.data_fecho?.slice(5, 7));
@@ -309,32 +338,49 @@ export default function Calendar() {
           if ((t.pl_eur || 0) > 0) byMonth[m].wins++;
         });
         setYearData(byMonth);
-        const monthStr = String(mes).padStart(2, "0");
-        setMonthTrades(r.data.filter(t => t.data_fecho?.startsWith(`${ano}-${monthStr}`)));
+        setYearTrades(r.data);
       }).catch(() => {});
-  }, [ano, mes]);
+    return () => { ignore = true; };
+  }, [ano]);
+
+  // ── Scroll automático para o painel de trades ──
+  useEffect(() => {
+    if (shownTrades.length > 0 && panelRef.current) {
+      panelRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [shownTrades]);
 
   // ── Stats mensais ──
   const stats = useMemo(() => {
     const d = yearData[mes] || {};
     const winDays = Object.values(calData).filter(v => v.pl > 0).length;
     return {
-      netPL:   d.pl    || 0,
-      grossPL: d.gross || 0,
-      fees:    d.fees  || 0,
+      netPL:   d.pl     || 0,
+      grossPL: d.gross  || 0,
+      fees:    d.fees   || 0,
       trades:  d.trades || 0,
       winRate: d.trades ? Math.round((d.wins || 0) / d.trades * 100) : 0,
       winDays,
     };
   }, [yearData, mes, calData]);
 
-  // ── Selecionar dia ──
-  const selectDay = async ds => {
-    if (selected === ds) { setSelected(null); setDayTrades([]); return; }
+  // ── Selecionar dia (vista mês / semana) ──
+  const selectDay = ds => {
+    if (selected === ds) { setSelected(null); setShownTrades([]); return; }
     setSelected(ds);
+    setSelectedMonth(null);
     setExpanded(null);
-    const r = await axios.get(`/api/trades?ano=${ano}`);
-    setDayTrades(r.data.filter(t => t.data_fecho?.startsWith(ds)));
+    setShownTrades(yearTrades.filter(t => t.data_fecho?.startsWith(ds)));
+  };
+
+  // ── Selecionar mês (vista ano) — mostra trades inline ──
+  const selectMonth = m => {
+    if (selectedMonth === m) { setSelectedMonth(null); setShownTrades([]); return; }
+    setSelectedMonth(m);
+    setSelected(null);
+    setExpanded(null);
+    const monthStr = String(m).padStart(2, "0");
+    setShownTrades(yearTrades.filter(t => t.data_fecho?.startsWith(`${ano}-${monthStr}`)));
   };
 
   // ── Navegar mês ──
@@ -348,20 +394,25 @@ export default function Calendar() {
   };
 
   // ── Grelha do calendário (domingo primeiro) ──
-  const firstDayOfWeek = new Date(ano, mes - 1, 1).getDay(); // 0 = domingo
+  const firstDayOfWeek = new Date(ano, mes - 1, 1).getDay();
   const daysInMonth    = new Date(ano, mes, 0).getDate();
   const cells = [];
   for (let i = 0; i < firstDayOfWeek; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
   const diaStr = d => `${ano}-${String(mes).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
 
+  // Título para o painel de trades
+  const panelTitle = selectedMonth
+    ? `${MONTHS_PT[selectedMonth - 1]} ${ano}`
+    : selected
+      ? `${parseInt(selected.slice(8))} de ${MONTHS_PT[parseInt(selected.slice(5,7))-1]} ${selected.slice(0,4)}`
+      : "";
+
   return (
     <>
       {/* ── Cabeçalho ── */}
       <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 14, marginBottom: 16 }}>
         <div className="page-title">Calendário</div>
-
-        {/* Tabs de vista */}
         <div style={{ display: "flex", gap: 2, background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, padding: 3 }}>
           {["year","month","week"].map(v => (
             <button key={v} onClick={() => setView(v)}
@@ -378,22 +429,41 @@ export default function Calendar() {
 
       {/* ── Vista ANO ── */}
       {view === "year" && (
-        <YearView ano={ano} setAno={setAno} yearData={yearData}
-          onSelectMonth={m => { setMes(m); setView("month"); }} />
+        <>
+          <YearView ano={ano} setAno={setAno} yearData={yearData}
+            selectedMonth={selectedMonth} onMonthClick={selectMonth} />
+          {shownTrades.length > 0 && (
+            <TradesPanel
+              panelRef={panelRef}
+              title={panelTitle}
+              trades={shownTrades}
+              expanded={expanded}
+              onExpand={id => setExpanded(p => p === id ? null : id)}
+            />
+          )}
+        </>
       )}
 
       {/* ── Vista SEMANA ── */}
       {view === "week" && (
-        <WeekView ano={ano} mes={mes} weekOffset={weekOffset} setWeekOffset={setWeekOffset}
-          calData={calData} onSelectDay={selectDay}
-          selected={selected} dayTrades={dayTrades} expanded={expanded}
-          onExpand={id => setExpanded(p => p === id ? null : id)} />
+        <>
+          <WeekView weekOffset={weekOffset} setWeekOffset={setWeekOffset}
+            calData={calData} onSelectDay={selectDay} selected={selected} />
+          {shownTrades.length > 0 && (
+            <TradesPanel
+              panelRef={panelRef}
+              title={panelTitle}
+              trades={shownTrades}
+              expanded={expanded}
+              onExpand={id => setExpanded(p => p === id ? null : id)}
+            />
+          )}
+        </>
       )}
 
       {/* ── Vista MÊS ── */}
       {view === "month" && (
         <>
-          {/* Navegação de mês */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <button onClick={prevMonth} style={navBtnStyle}>‹</button>
@@ -409,57 +479,40 @@ export default function Calendar() {
             </button>
           </div>
 
-          {/* Barra de estatísticas */}
           <StatsBar stats={stats} />
 
-          {/* Cabeçalhos dos dias da semana (+ coluna de semana) */}
           <div style={{ display: "grid", gridTemplateColumns: "28px repeat(7, 1fr)", gap: 4, marginBottom: 4 }}>
-            <div style={{ fontSize: "0.58rem", fontWeight: 700, color: MUT,
-              textTransform: "uppercase", letterSpacing: ".06em",
-              textAlign: "center", padding: "4px 0" }}>Sem</div>
+            <div style={{ fontSize: "0.58rem", fontWeight: 700, color: MUT, textTransform: "uppercase", letterSpacing: ".06em", textAlign: "center", padding: "4px 0" }}>Sem</div>
             {WEEKDAYS.map(d => (
-              <div key={d} style={{ textAlign: "center", fontSize: "0.63rem", fontWeight: 700,
-                color: MUT, textTransform: "uppercase", letterSpacing: ".08em", padding: "4px 0" }}>
-                {d}
-              </div>
+              <div key={d} style={{ textAlign: "center", fontSize: "0.63rem", fontWeight: 700, color: MUT, textTransform: "uppercase", letterSpacing: ".08em", padding: "4px 0" }}>{d}</div>
             ))}
           </div>
 
-          {/* Grelha dos dias (linhas com número de semana) */}
           {(() => {
-            // Dividir células em linhas de 7
             const rows = [];
             for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
             return rows.map((row, ri) => {
-              // Primeiro dia não-nulo da linha para calcular n.º semana
               const firstDay = row.find(d => d != null);
               const wn = firstDay ? isoWeek(ano, mes, firstDay) : null;
               return (
                 <div key={ri} style={{ display: "grid", gridTemplateColumns: "28px repeat(7, 1fr)", gap: 4, marginBottom: 4 }}>
-                  {/* Número da semana */}
-                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "center",
-                    paddingTop: 10, fontSize: "0.6rem", fontWeight: 700,
-                    color: MUT, opacity: 0.6 }}>
-                    {wn}
-                  </div>
-                  {/* 7 células */}
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: 10, fontSize: "0.6rem", fontWeight: 700, color: MUT, opacity: 0.6 }}>{wn}</div>
                   {row.map((d, ci) => {
                     if (!d) return (
-                      <div key={`e${ri}-${ci}`} style={{ minHeight: 110, borderRadius: 8,
-                        background: "rgba(0,0,0,0.18)", border: "1px solid rgba(255,255,255,0.03)" }} />
+                      <div key={`e${ri}-${ci}`} style={{ minHeight: 110, borderRadius: 8, background: "rgba(0,0,0,0.18)", border: "1px solid rgba(255,255,255,0.03)" }} />
                     );
-                    const ds      = diaStr(d);
-                    const data    = calData[ds];
-                    const isToday = ds === todayStr;
-                    const isSel   = selected === ds;
+                    const ds        = diaStr(d);
+                    const data      = calData[ds];
+                    const isToday   = ds === todayStr;
+                    const isSel     = selected === ds;
                     const hasTrades = !!data;
 
                     let bg      = "var(--card)";
                     let bdColor = "var(--border)";
                     let bdWidth = 1;
 
-                    if (isToday)        { bdColor = T; bdWidth = 2; }
-                    else if (isSel)     { bdColor = B; bdWidth = 2; }
+                    if (isToday)           { bdColor = T; bdWidth = 2; }
+                    else if (isSel)        { bdColor = B; bdWidth = 2; }
                     else if (data?.pl > 0) bdColor = "rgba(16,185,129,0.3)";
                     else if (data?.pl < 0) bdColor = "rgba(244,63,94,0.25)";
 
@@ -474,19 +527,11 @@ export default function Calendar() {
                           transition: "border-color .2s", display: "flex", flexDirection: "column" }}
                         onMouseEnter={e => { if (hasTrades) e.currentTarget.style.borderColor = data.pl >= 0 ? G : R; }}
                         onMouseLeave={e => { if (hasTrades) e.currentTarget.style.borderColor = bdColor; }}>
-                        <div style={{ fontSize: "0.67rem", fontWeight: isToday ? 700 : 400,
-                          color: isToday ? T : MUT, alignSelf: "flex-start" }}>
-                          {d}
-                        </div>
+                        <div style={{ fontSize: "0.67rem", fontWeight: isToday ? 700 : 400, color: isToday ? T : MUT, alignSelf: "flex-start" }}>{d}</div>
                         {data && (
                           <div style={{ marginTop: "auto", paddingTop: 8 }}>
-                            <div style={{ fontWeight: 800, fontSize: "0.88rem",
-                              color: data.pl >= 0 ? G : R, lineHeight: 1.2 }}>
-                              {fmtPL(data.pl)}
-                            </div>
-                            <div style={{ fontSize: "0.68rem", color: MUT, marginTop: 3 }}>
-                              {data.n_trades} trade{data.n_trades !== 1 ? "s" : ""}
-                            </div>
+                            <div style={{ fontWeight: 800, fontSize: "0.88rem", color: data.pl >= 0 ? G : R, lineHeight: 1.2 }}>{fmtPL(data.pl)}</div>
+                            <div style={{ fontSize: "0.68rem", color: MUT, marginTop: 3 }}>{data.n_trades} trade{data.n_trades !== 1 ? "s" : ""}</div>
                           </div>
                         )}
                       </div>
@@ -497,10 +542,14 @@ export default function Calendar() {
             });
           })()}
 
-          {/* Detalhe do dia selecionado */}
-          {selected && dayTrades.length > 0 && (
-            <DayTradesPanel selected={selected} dayTrades={dayTrades}
-              expanded={expanded} onExpand={id => setExpanded(p => p === id ? null : id)} />
+          {shownTrades.length > 0 && (
+            <TradesPanel
+              panelRef={panelRef}
+              title={panelTitle}
+              trades={shownTrades}
+              expanded={expanded}
+              onExpand={id => setExpanded(p => p === id ? null : id)}
+            />
           )}
         </>
       )}

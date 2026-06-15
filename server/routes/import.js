@@ -45,6 +45,13 @@ const SYMBOL_OVERRIDES = {
   EDPR: "ES", // EDP Renováveis — sufixo .PT mas sede fiscal em Espanha (AT: 724)
 };
 
+// Overrides de país APENAS para dividendos: empresas cujo país de sede (mais-valias)
+// difere do país da holding que paga dividendos (§7 Skill 1).
+// Chave: símbolo base (maiúsculas); Valor: ISO do país de origem dos dividendos.
+const DIVIDEND_COUNTRY_OVERRIDES = {
+  JMT: "NL", // Jerónimo Martins — mais-valias em Portugal (Anexo G), mas dividendos pagos pela holding neerlandesa (AT: 528)
+};
+
 // Empresas europeias/internacionais com listagem cruzada em bolsas americanas.
 // Em IBKR o ticker aparece sem sufixo e a moeda é USD — sem esta tabela o
 // fallback por moeda daria erradamente "Estados Unidos".
@@ -82,7 +89,7 @@ const CURRENCY_COUNTRY = {
 };
 
 /**
- * Resolve o país de sede fiscal com hierarquia obrigatória (ver instructions.md §2.C):
+ * Resolve o país de sede fiscal com hierarquia obrigatória (ver instructions.md §3):
  *   1. Override explícito  (ex: EDPR → Espanha, ignora sufixo .PT)
  *   2. ISIN (prefixo ISO — fonte mais fiável de país de incorporação)
  *   3. Sufixo do ticker   (.DE → Alemanha, .US → EUA, etc.)
@@ -106,7 +113,23 @@ function resolveCountry(symbol, isinIso, currency) {
   return null;
 }
 
+/**
+ * Resolve o país de origem para dividendos.
+ * Aplica DIVIDEND_COUNTRY_OVERRIDES antes da lógica geral (§7 Skill 1):
+ * ex: JMT.PT → mais-valias em Portugal, dividendos em Países Baixos (holding).
+ */
+function resolveDividendCountry(symbol, isinIso, currency) {
+  const base = symbol.split(".")[0].toUpperCase();
+  if (DIVIDEND_COUNTRY_OVERRIDES[base])
+    return EXCHANGE_COUNTRY[DIVIDEND_COUNTRY_OVERRIDES[base]] || null;
+  return resolveCountry(symbol, isinIso, currency);
+}
+
 // ── Taxa de câmbio histórica (frankfurter.app / BCE) ──────
+// TODO (§6 privacidade): esta função viola instructions.md §6 ao enviar moeda e data
+// de cada trade IBKR para api.frankfurter.app (servidor externo).
+// Solução planeada: substituir por tabela local do BCE (eurofxref-hist.zip) com
+// endpoint de atualização manual opt-in. Ver secção 3 do audit de conformidade.
 const rateCache = new Map();
 function fetchEURRate(currency, dateStr) {
   if (!currency || currency === "EUR") return Promise.resolve(1.0);
@@ -216,10 +239,13 @@ async function parseXTB(buffer) {
     if (!sym) return;
 
     const symStr     = sym.toString().trim();
-    const isStock    = /\.[A-Z]{2,4}(_\d+)?$/.test(symStr);
     const commission = Math.abs(toFloat(get(iComm)));
     const swap       = toFloat(get(iSwap));
     const rollover   = toFloat(get(iRollover));
+    const typeStr    = (get(iType) || "").toString().toLowerCase();
+    const hasSuffix  = /\.[A-Z]{2,4}(_\d+)?$/.test(symStr);
+    // CFD se: tem swap/rollover, o campo Type indica CFD, ou não tem sufixo de bolsa
+    const isCFD      = swap !== 0 || rollover !== 0 || typeStr.includes("cfd") || !hasSuffix;
     const purchaseVal = toFloat(get(iPurchase));
     const saleVal     = toFloat(get(iSale));
     const grossPL     = iGrossPL >= 0 ? toFloat(get(iGrossPL)) : null;
@@ -254,7 +280,7 @@ async function parseXTB(buffer) {
       comment:          iComment >= 0 ? get(iComment)?.toString().trim() || null : null,
       moeda_original:   "EUR",
       taxa_cambio:      1.0,
-      categoria:        isStock ? "STOCK" : "CFD",
+      categoria:        isCFD ? "CFD" : "STOCK",
       corretora:        "XTB",
       tipo_ordem:       get(iType)?.toString() ?? null,
       pais,
@@ -336,7 +362,7 @@ async function parseXTB(buffer) {
       const sym = (get(cSym) || "").toString().trim();
       if (!sym) return;
       const key = `${sym}|${date?.slice(0, 10)}`;
-      const pais = resolveCountry(sym, null, "EUR");
+      const pais = resolveDividendCountry(sym, null, "EUR");
 
       if (isDivid) {
         if (!divMap.has(key)) {
@@ -463,7 +489,7 @@ async function parseIBKR(buffer) {
       // ISIN na Description: "SAP(DE0007164600) Cash Dividend" → prefixo "DE"
       const isinMatch = desc.match(/\(([A-Z]{2}\d{8,12})\)/);
       const isinIso   = isinMatch ? isinMatch[1].slice(0, 2).toUpperCase() : (isinBySymbol.get(sym) || null);
-      const pais      = resolveCountry(sym, isinIso, g("Currency") || "USD");
+      const pais      = resolveDividendCountry(sym, isinIso, g("Currency") || "USD");
       const currency = g("Currency") || "USD";
       const amount = toFloat(g("Amount"));
       if (amount === 0) continue;
