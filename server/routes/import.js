@@ -503,11 +503,35 @@ async function parseXTB(buffer) {
   return { trades, dividends, deposits };
 }
 
+// Parser de uma linha CSV que respeita aspas (campos com vírgula lá dentro,
+// ex: Date/Time "2025-10-09, 09:51:54", ou números "1,385"). Suporta "" como aspa escapada.
+function parseCSVLine(line) {
+  const out = [];
+  let cur = "", inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQ) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; }
+        else inQ = false;
+      } else cur += ch;
+    } else if (ch === '"') {
+      inQ = true;
+    } else if (ch === ",") {
+      out.push(cur.trim()); cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  out.push(cur.trim());
+  return out;
+}
+
 // ── Parser IBKR (.csv) ────────────────────────────────────
 async function parseIBKR(buffer) {
   const text   = buffer.toString("utf8");
   const lines  = text.split(/\r?\n/);
-  const parsed = lines.map(raw => raw.split(",").map(c => c.replace(/^"|"$/g, "").trim()));
+  const parsed = lines.map(parseCSVLine);
 
   // ── Passo 1: pré-passagem para extrair ISINs ──────────────
   // A secção "Financial Instrument Information" do CSV da IBKR contém a coluna ISIN
