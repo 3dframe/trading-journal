@@ -5,7 +5,7 @@ import axios from "axios";
 const C = { green: "#10b981", red: "#f43f5e", blue: "#4f6af5", amber: "#f59e0b", muted: "var(--muted)" };
 
 // ── Formatadores ──────────────────────────────────────────
-const fmtE  = v => "€ " + Number(v || 0).toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtE  = v => "€ " + Number(v || 0).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtD  = v => v ? String(v).slice(0, 10) : "—";
 const fmtMV = v => (v >= 0 ? "+" : "") + fmtE(v);
 const clrMV = v => (v >= 0 ? C.green : C.red);

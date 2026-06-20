@@ -69,7 +69,7 @@ const KNOWN_SYMBOLS_COUNTRY = {
   // Suíça — AT 756
   NVS:"CH",  ROG:"CH",  UBS:"CH",  CFR:"CH",
   // Espanha — AT 724
-  BBVA:"ES", TEF:"ES",  ITX:"ES",
+  BBVA:"ES", TEF:"ES",  ITX:"ES",  SAN:"ES",  IBE:"ES",  REP:"ES",  NTGY:"ES",
   // Dinamarca — AT 208
   NVO:"DK",  NOVO:"DK",
   // Suécia — AT 752
@@ -88,13 +88,56 @@ const CURRENCY_COUNTRY = {
   NOK:"NO", PLN:"PL", CNY:"CN",
 };
 
+// CFDs sobre subjacentes que NÃO são ações — não têm país de incorporação.
+// Classificados pelo tipo de subjacente (mercadoria/índice/forex/cripto) em vez de país,
+// para ficarem coerentes em todas as vistas (registo, estatísticas, IRS).
+const COMMODITIES = new Set([
+  "GOLD","SILVER","OIL","OILWTI","WTI","BRENT","NATGAS","GAS","COCOA","COFFEE",
+  "SUGAR","WHEAT","CORN","COTTON","COPPER","PLATINUM","PALLADIUM","SOYBEAN","RICE",
+  "ALUMINIUM","NICKEL","ZINC","LEAD","EMISSIONS",
+]);
+const CRYPTOS = new Set([
+  "BITCOIN","ETHEREUM","CARDANO","SOLANA","DOGECOIN","POLYGON","FILECOIN","DECENTRALAND",
+  "RIPPLE","LITECOIN","POLKADOT","CHAINLINK","STELLAR","TRON","SHIBA","AVALANCHE",
+  "UNISWAP","COSMOS","ALGORAND","TEZOS","EOS","MONERO","DASH","SANDBOX","VECHAIN",
+]);
+const FX_CODES = new Set([
+  "EUR","USD","GBP","JPY","CHF","CAD","AUD","NZD","SEK","NOK","DKK","PLN",
+  "CNH","CNY","HUF","CZK","TRY","ZAR","MXN","SGD","HKD","ILS","RON",
+]);
+
+/**
+ * Extrai o ativo subjacente de um símbolo de opção, ou null se não for opção.
+ * Formato: <TICKER><dia><MÊS><ano><strike><C|P>
+ * Ex: SAN17APR269.75C → SAN ; BBVA20MAR2619C → BBVA ; DB15MAY2630C → DB
+ */
+function optionUnderlying(symbol) {
+  const m = (symbol || "").toUpperCase().match(/^([A-Z]+)\d{1,2}[A-Z]{3}\d{2}[\d.]+[CP]$/);
+  return m ? m[1] : null;
+}
+
+/**
+ * Classifica um CFD pelo tipo de subjacente (ou null se for/parecer uma ação).
+ * Ex: COCOA→Mercadoria, US100→Índice, EURUSD/EUR.USD→Forex, ETHEREUM→Cripto.
+ */
+function classifyUnderlying(symbol) {
+  const s = (symbol || "").toUpperCase().replace(/\./g, "").replace(/_\d+$/, "");
+  if (COMMODITIES.has(s)) return "Mercadoria";
+  if (CRYPTOS.has(s))     return "Cripto";
+  if (/^[A-Z]{6}$/.test(s) && FX_CODES.has(s.slice(0, 3)) && FX_CODES.has(s.slice(3, 6)))
+    return "Forex";
+  if (/^[A-Z]{2,5}\d{2,4}$/.test(s)) return "Índice"; // US100, DE30, EU50, FRA40, JP225…
+  return null;
+}
+
 /**
  * Resolve o país de sede fiscal com hierarquia obrigatória (ver instructions.md §3):
  *   1. Override explícito  (ex: EDPR → Espanha, ignora sufixo .PT)
- *   2. ISIN (prefixo ISO — fonte mais fiável de país de incorporação)
- *   3. Sufixo do ticker   (.DE → Alemanha, .US → EUA, etc.)
- *   4. Exceções conhecidas (blue chips europeus sem sufixo em IBKR)
- *   5. Moeda como estimativa (ADRs europeus em USD seriam mal classificados)
+ *   2. Tipo de subjacente  (mercadoria/índice/forex/cripto — não são ações)
+ *   3. ISIN (prefixo ISO — fonte mais fiável de país de incorporação)
+ *   4. Sufixo do ticker   (.DE → Alemanha, .US → EUA, etc.)
+ *   5. Exceções conhecidas (blue chips europeus sem sufixo em IBKR)
+ *   6. Moeda como estimativa (ADRs europeus em USD seriam mal classificados)
  */
 function resolveCountry(symbol, isinIso, currency) {
   const base   = symbol.split(".")[0].toUpperCase();
@@ -102,6 +145,11 @@ function resolveCountry(symbol, isinIso, currency) {
 
   if (SYMBOL_OVERRIDES[base])
     return EXCHANGE_COUNTRY[SYMBOL_OVERRIDES[base]] || null;
+  // Opções: resolver pelo país do ativo subjacente (ex: SAN/BBVA → Madrid/Espanha)
+  const optUnd = optionUnderlying(symbol);
+  if (optUnd) return resolveCountry(optUnd, isinIso, currency);
+  const tipo = classifyUnderlying(symbol);
+  if (tipo) return tipo;
   if (isinIso && EXCHANGE_COUNTRY[isinIso])
     return EXCHANGE_COUNTRY[isinIso];
   if (suffix && EXCHANGE_COUNTRY[suffix])
@@ -189,10 +237,24 @@ async function parseXTB(buffer) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer);
 
+  // ── Número de conta (cabeçalho do relatório: "Account number" / "Account") ──
+  let accountNumber = null;
+  wb.eachSheet(ws => {
+    if (accountNumber) return;
+    for (let r = 1; r <= 3; r++) {
+      const label = (cellVal(ws.getRow(r).getCell(1)) || "").toString().toLowerCase();
+      if (label.includes("account")) {
+        const v = cellVal(ws.getRow(r).getCell(2));
+        if (v) { accountNumber = v.toString().trim(); break; }
+      }
+    }
+  });
+
   // ── Aba de operações fechadas ──
   let sheet = null, headerRowNum = 1;
   wb.eachSheet(ws => {
     if (sheet) return;
+    if (ws.name.toLowerCase().includes("cash")) return; // evita falsos positivos em comentários de movimentos de caixa
     for (let r = 1; r <= 15; r++) {
       const cells = [];
       ws.getRow(r).eachCell(c => cells.push((cellVal(c) || "").toString().toLowerCase()));
@@ -210,7 +272,8 @@ async function parseXTB(buffer) {
   const col = (...keys) => headers.findIndex(h => keys.some(k => h.includes(k)));
 
   const iPos        = col("position", "posição", "id");
-  const iSym        = col("símbolo", "symbol");
+  const iSym        = col("símbolo", "symbol", "ticker");
+  const iCategory   = col("category", "categoria");
   const iType       = col("tipo", "type");
   const iVol        = col("volume");
   const iOpen       = col("hora de abertura", "open time", "data de abertura", "abertura");
@@ -228,6 +291,11 @@ async function parseXTB(buffer) {
   const iTP         = col("t/p", "tp", "take profit");
   const iMargin     = col("margin", "margem");
   const iComment    = col("comment", "comentário", "comentario", "observ");
+  const iInstrument = col("instrument", "instrumento");
+  const iProduct    = col("product", "produto");
+  const iOpenConv   = col("open conversion", "taxa de conversão de abertura");
+  const iCloseConv  = col("close conversion", "taxa de conversão de encerramento");
+  const iCloseOrig  = col("close origin", "origem de encerramento");
 
   if (iSym < 0) throw new Error("Coluna de símbolo não encontrada no ficheiro XTB.");
 
@@ -242,10 +310,14 @@ async function parseXTB(buffer) {
     const commission = Math.abs(toFloat(get(iComm)));
     const swap       = toFloat(get(iSwap));
     const rollover   = toFloat(get(iRollover));
-    const typeStr    = (get(iType) || "").toString().toLowerCase();
-    const hasSuffix  = /\.[A-Z]{2,4}(_\d+)?$/.test(symStr);
-    // CFD se: tem swap/rollover, o campo Type indica CFD, ou não tem sufixo de bolsa
-    const isCFD      = swap !== 0 || rollover !== 0 || typeStr.includes("cfd") || !hasSuffix;
+    const typeStr     = (get(iType) || "").toString().toLowerCase();
+    const categoryStr = iCategory >= 0 ? (get(iCategory) || "").toString().toLowerCase() : "";
+    const hasSuffix   = /\.[A-Z]{2,4}(_\d+)?$/.test(symStr);
+    // Categoria explícita (coluna "Category") tem prioridade; sem ela, usa heurística
+    // baseada em swap/rollover/sufixo (relatórios antigos não tinham esta coluna).
+    const isCFD = categoryStr
+      ? categoryStr.includes("cfd") || categoryStr.includes("forex")
+      : (swap !== 0 || rollover !== 0 || typeStr.includes("cfd") || !hasSuffix);
     const purchaseVal = toFloat(get(iPurchase));
     const saleVal     = toFloat(get(iSale));
     const grossPL     = iGrossPL >= 0 ? toFloat(get(iGrossPL)) : null;
@@ -278,17 +350,26 @@ async function parseXTB(buffer) {
       tp:               iTP     >= 0 ? toFloat(get(iTP))     || null : null,
       margin:           iMargin >= 0 ? toFloat(get(iMargin)) || null : null,
       comment:          iComment >= 0 ? get(iComment)?.toString().trim() || null : null,
+      nome_instrumento: iInstrument >= 0 ? get(iInstrument)?.toString().trim() || null : null,
+      produto:          iProduct    >= 0 ? get(iProduct)?.toString().trim()    || null : null,
+      origem:           iCloseOrig  >= 0 ? get(iCloseOrig)?.toString().trim() || null : null,
+      conversao_abertura: iOpenConv  >= 0 ? toFloat(get(iOpenConv))  || null : null,
+      conversao_fecho:    iCloseConv >= 0 ? toFloat(get(iCloseConv)) || null : null,
       moeda_original:   "EUR",
       taxa_cambio:      1.0,
       categoria:        isCFD ? "CFD" : "STOCK",
       corretora:        "XTB",
+      conta:            accountNumber,
+      conta_nome:       null, // XTB não disponibiliza o nome do titular no relatório
       tipo_ordem:       get(iType)?.toString() ?? null,
       pais,
       ref_externa:      posId || null,
     });
   });
 
-  if (!trades.length) throw new Error("Nenhuma operação encontrada no ficheiro XTB.");
+  // Nota: NÃO bloquear aqui se não houver trades — um período pode não ter operações
+  // fechadas mas ter juros/dividendos/depósitos válidos na folha de Cash Operations.
+  // A validação final (nada encontrado em sítio nenhum) acontece no fim da função.
 
   // ── Aba de movimentos de caixa ──
   const dividends = [];
@@ -314,10 +395,14 @@ async function parseXTB(buffer) {
       cashHeaders.push((cellVal(c) || "").toString().toLowerCase().trim());
     });
     const cc = (...keys) => cashHeaders.findIndex(h => keys.some(k => h.includes(k)));
-    const cType   = cc("type", "tipo", "comment", "operation");
-    const cDate   = cc("time", "date", "data");
-    const cSym    = cc("symbol", "símbolo");
-    const cAmount = cc("amount", "valor", "montante");
+    const cType      = cc("type", "tipo", "operation");
+    const cDate      = cc("time", "date", "data");
+    const cSym       = cc("symbol", "símbolo", "ticker");
+    const cAmount    = cc("amount", "valor", "montante");
+    const cId        = cc("id");
+    const cInstrument = cc("instrument", "instrumento");
+    const cProduct    = cc("product", "produto");
+    const cComment    = cc("comment", "comentário", "comentario");
 
     const divMap      = new Map();
     const interestMap = new Map(); // agrupa juros por data
@@ -328,34 +413,51 @@ async function parseXTB(buffer) {
       const type  = (get(cType) || "").toString().toLowerCase().trim();
       const amount = toFloat(get(cAmount));
       const date   = toDate(get(cDate));
+      const opId   = cId >= 0 ? get(cId)?.toString().trim() || null : null;
+      const opInstrument = cInstrument >= 0 ? get(cInstrument)?.toString().trim() || null : null;
+      const opProduct    = cProduct    >= 0 ? get(cProduct)?.toString().trim()    || null : null;
+      const opComment    = cComment    >= 0 ? get(cComment)?.toString().trim()    || null : null;
 
+      // "Free-funds interest" (formato antigo, com hífen) vs "Free funds interest" (atual, com espaço)
+      const isFreeFundsType   = type.includes("free-funds interest") || type.includes("free funds interest");
       const isDivid           = type.includes("divid");
       const isWithhold        = type.includes("withhold") && !type.includes("interest");
-      const isFreeInterest    = type.includes("free-funds interest") && !type.includes("tax");
-      const isFreeInterestTax = type.includes("free-funds interest") && type.includes("tax");
-      const isDeposit         = type.includes("deposit") || type.includes("entrada de fundos") || type.includes("fund");
+      const isFreeInterest    = isFreeFundsType && !type.includes("tax");
+      const isFreeInterestTax = isFreeFundsType && type.includes("tax");
+      // "fund" isolado é demasiado genérico — apanha "free funds interest", por isso
+      // os juros têm de ser verificados ANTES do depósito/levantamento.
+      const isDeposit         = !isFreeFundsType && (type.includes("deposit") || type.includes("entrada de fundos") || type.includes("fund"));
       const isWithdraw        = type.includes("withdrawal") || type.includes("levantamento") || type.includes("saída");
-
-      if (isDeposit || isWithdraw) {
-        if (date && amount !== 0) {
-          deposits.push({ data: date, valor: Math.abs(amount), tipo: isDeposit ? "deposito" : "levantamento", corretora: "XTB", descricao: get(cType)?.toString() ?? null });
-        }
-        return;
-      }
 
       if (isFreeInterest) {
         // Agrupa juros do mesmo dia
         const key = date?.slice(0, 10) || "?";
         if (!interestMap.has(key)) {
-          interestMap.set(key, { simbolo: "JUROS_XTB", data_pagamento: date, valor_bruto_eur: 0, retencao_eur: 0, valor_liq_eur: 0, pais_fonte: "Polónia", moeda: "EUR", corretora: "XTB", tipo: "INTEREST" });
+          interestMap.set(key, { simbolo: "JUROS_XTB", data_pagamento: date, valor_bruto_eur: 0, retencao_eur: 0, valor_liq_eur: 0, pais_fonte: "Polónia", moeda: "EUR", corretora: "XTB", conta: accountNumber, conta_nome: null, produto: opProduct, tipo: "INTEREST", _movs: [] });
         }
         interestMap.get(key).valor_bruto_eur += Math.abs(amount);
+        interestMap.get(key)._movs.push({ id: opId, tipo: "Free funds interest", valor: amount, data: date });
         return;
       }
 
       if (isFreeInterestTax) {
         const key = date?.slice(0, 10) || "?";
-        if (interestMap.has(key)) interestMap.get(key).retencao_eur += Math.abs(amount);
+        if (interestMap.has(key)) {
+          interestMap.get(key).retencao_eur += Math.abs(amount);
+          interestMap.get(key)._movs.push({ id: opId, tipo: "Free funds interest tax", valor: amount, data: date });
+        }
+        return;
+      }
+
+      if (isDeposit || isWithdraw) {
+        if (date && amount !== 0) {
+          deposits.push({
+            data: date, valor: Math.abs(amount), tipo: isDeposit ? "deposito" : "levantamento",
+            corretora: "XTB", conta: accountNumber, conta_nome: null, ref_externa: opId,
+            tipo_raw: get(cType)?.toString() ?? null, nome_instrumento: opInstrument, produto: opProduct,
+            descricao: opComment || get(cType)?.toString() || null,
+          });
+        }
         return;
       }
 
@@ -364,25 +466,39 @@ async function parseXTB(buffer) {
       const key = `${sym}|${date?.slice(0, 10)}`;
       const pais = resolveDividendCountry(sym, null, "EUR");
 
-      if (isDivid) {
+      if (isDivid || isWithhold) {
+        // A linha de "Withholding tax" pode aparecer ANTES da linha "Dividend" correspondente
+        // no ficheiro (a XTB não garante a ordem) — por isso o agregado tem de ser criado em
+        // qualquer um dos dois casos, nunca só quando já existe (senão a 1ª retenção perde-se).
         if (!divMap.has(key)) {
-          divMap.set(key, { simbolo: sym.split(".")[0].toUpperCase(), data_pagamento: date, valor_bruto_eur: 0, retencao_eur: 0, moeda: "EUR", corretora: "XTB", pais_fonte: pais, tipo: "DIVIDEND" });
+          divMap.set(key, { simbolo: sym.split(".")[0].toUpperCase(), data_pagamento: date, valor_bruto_eur: 0, retencao_eur: 0, moeda: "EUR", corretora: "XTB", conta: accountNumber, conta_nome: null, nome_instrumento: opInstrument, produto: opProduct, pais_fonte: pais, tipo: "DIVIDEND", _movs: [] });
         }
-        divMap.get(key).valor_bruto_eur += amount;
-      } else if (isWithhold && divMap.has(key)) {
-        divMap.get(key).retencao_eur += Math.abs(amount);
+        if (isDivid) divMap.get(key).valor_bruto_eur += amount;
+        else         divMap.get(key).retencao_eur    += Math.abs(amount);
+        divMap.get(key)._movs.push({ id: opId, tipo: isDivid ? "Dividend" : "Withholding tax", valor: amount, data: date });
       }
     });
 
     for (const d of divMap.values()) {
-      d.valor_liq_eur = d.valor_bruto_eur - d.retencao_eur;
+      d.valor_liq_eur  = d.valor_bruto_eur - d.retencao_eur;
+      d._movs.sort((a, b) => (a.data || "").localeCompare(b.data || ""));
+      d.ref_externa    = d._movs.map(m => m.id).filter(Boolean).sort().join("+") || null;
+      d.movimentos     = JSON.stringify(d._movs);
+      delete d._movs;
       dividends.push(d);
     }
     for (const i of interestMap.values()) {
       i.valor_liq_eur = i.valor_bruto_eur - i.retencao_eur;
+      i._movs.sort((a, b) => (a.data || "").localeCompare(b.data || ""));
+      i.ref_externa   = i._movs.map(m => m.id).filter(Boolean).sort().join("+") || null;
+      i.movimentos    = JSON.stringify(i._movs);
+      delete i._movs;
       if (i.valor_bruto_eur > 0) dividends.push(i);
     }
   }
+
+  if (!trades.length && !dividends.length && !deposits.length)
+    throw new Error("Nenhuma operação encontrada no ficheiro XTB.");
 
   return { trades, dividends, deposits };
 }
@@ -399,7 +515,19 @@ async function parseIBKR(buffer) {
   // incorporação da empresa (ISO 3166-1 alpha-2) — fonte mais fiável de país.
   const isinBySymbol = new Map(); // symbol → prefixo ISO 2 letras (ex: "DE")
   let fiiHeaders = null;
+  // Número e nome de conta — secção "Account Information" (Field Name "Account"/"Name")
+  let accountNumber = null;
+  let accountName   = null;
+  let accHeaders = null;
   for (const cols of parsed) {
+    if (cols[0] === "Account Information" && cols[1] === "Header") { accHeaders = cols; continue; }
+    if (cols[0] === "Account Information" && cols[1] === "Data" && accHeaders) {
+      const g = key => { const i = accHeaders.indexOf(key); return i >= 0 ? cols[i] : null; };
+      const fieldName = (g("Field Name") || "").toLowerCase();
+      if (fieldName === "account") accountNumber = g("Field Value");
+      if (fieldName === "name")    accountName   = g("Field Value");
+      continue;
+    }
     if (cols[0] === "Financial Instrument Information" && cols[1] === "Header") {
       fiiHeaders = cols; continue;
     }
@@ -466,11 +594,18 @@ async function parseIBKR(buffer) {
         sl:               null,
         tp:               null,
         margin:           null,
-        comment:          null,
+        comment:          g("Notes/Codes") || null,
+        nome_instrumento: g("Description") || null,
+        produto:          cat || null,
+        origem:           null,
+        conversao_abertura: null,
+        conversao_fecho:    null,
         moeda_original:   currency,
         taxa_cambio:      currency === "EUR" ? 1.0 : null,
         categoria,
         corretora:        "IBKR",
+        conta:            g("ClientAccountID") || g("Account") || accountNumber,
+        conta_nome:       accountName,
         tipo_ordem:       rawQty >= 0 ? "BUY" : "SELL",
         pais,
         ref_externa:      `${sym}|${dt}|${qty}`,
@@ -493,15 +628,23 @@ async function parseIBKR(buffer) {
       const currency = g("Currency") || "USD";
       const amount = toFloat(g("Amount"));
       if (amount === 0) continue;
+      const divDate = toDate(g("Date") || g("Payment Date"));
+      const txId    = g("TransactionID") || null;
       dividends.push({
         simbolo:         sym,
-        data_pagamento:  toDate(g("Date") || g("Payment Date")),
+        data_pagamento:  divDate,
         valor_bruto_eur: amount,
         retencao_eur:    0,
         valor_liq_eur:   amount,
         pais_fonte:      pais,
         moeda:           currency,
         corretora:       "IBKR",
+        conta:           g("ClientAccountID") || g("Account") || accountNumber,
+        conta_nome:      accountName,
+        nome_instrumento: desc || null,
+        produto:         null,
+        ref_externa:     txId,
+        movimentos:      JSON.stringify([{ id: txId, tipo: "Dividend", valor: amount, data: divDate }]),
         tipo:            "DIVIDEND",
         _currency:       currency, // auxiliar para conversão
       });
@@ -516,6 +659,9 @@ async function parseIBKR(buffer) {
         const last = dividends[dividends.length - 1];
         last.retencao_eur  += ret;
         last.valor_liq_eur -= ret;
+        const movs = JSON.parse(last.movimentos || "[]");
+        movs.push({ id: null, tipo: "Withholding Tax", valor: -ret, data: last.data_pagamento });
+        last.movimentos = JSON.stringify(movs);
       }
       continue;
     }
@@ -540,6 +686,8 @@ async function parseIBKR(buffer) {
           pais_fonte:      "Irlanda",
           moeda:           currency,
           corretora:       "IBKR",
+          conta:           g("ClientAccountID") || g("Account") || accountNumber,
+          conta_nome:      accountName,
           tipo:            "INTEREST",
           _currency:       currency,
         });
@@ -554,12 +702,12 @@ async function parseIBKR(buffer) {
       const amount = toFloat(g("Amount"));
       const date   = toDate(g("Date") || g("Settle Date"));
       if (date && amount !== 0) {
-        deposits.push({ data: date, valor: Math.abs(amount), tipo: amount >= 0 ? "deposito" : "levantamento", corretora: "IBKR", descricao: g("Description") || null });
+        deposits.push({ data: date, valor: Math.abs(amount), tipo: amount >= 0 ? "deposito" : "levantamento", corretora: "IBKR", conta: g("ClientAccountID") || g("Account") || accountNumber, conta_nome: accountName, ref_externa: g("TransactionID") || null, tipo_raw: g("Description") || null, descricao: g("Description") || null });
       }
     }
   }
 
-  if (!trades.length && !dividends.length)
+  if (!trades.length && !dividends.length && !deposits.length)
     throw new Error("Nenhuma operação encontrada no ficheiro IBKR. Certifica-te que é um Activity Statement completo.");
 
   // ── Conversão cambial para EUR ──
@@ -596,6 +744,37 @@ async function parseIBKR(buffer) {
   return { trades, dividends, deposits, convFailed };
 }
 
+// ── Contar duplicados sem gravar (para a pré-visualização) ────
+function countExisting(username, trades, dividends, deposits = []) {
+  const db = getDb(username);
+
+  const existsTrade = db.prepare(`SELECT 1 FROM trades WHERE corretora = ? AND ref_externa = ? LIMIT 1`);
+  const existsDivRef = db.prepare(`SELECT 1 FROM dividendos WHERE corretora = ? AND ref_externa = ? LIMIT 1`);
+  const existsDivKey = db.prepare(`
+    SELECT 1 FROM dividendos WHERE simbolo = ? AND data_pagamento = ? AND corretora = ?
+      AND (conta = ? OR (conta IS NULL AND ? IS NULL)) LIMIT 1`);
+  const existsDepRef = db.prepare(`SELECT 1 FROM depositos WHERE corretora = ? AND ref_externa = ? LIMIT 1`);
+  const existsDepKey = db.prepare(`
+    SELECT 1 FROM depositos WHERE data = ? AND valor = ? AND corretora = ? AND tipo = ?
+      AND (conta = ? OR (conta IS NULL AND ? IS NULL)) LIMIT 1`);
+
+  const dupTrades = trades.filter(t =>
+    t.ref_externa && existsTrade.get(t.corretora, t.ref_externa)
+  ).length;
+
+  const dupDividends = dividends.filter(d =>
+    (d.ref_externa && existsDivRef.get(d.corretora, d.ref_externa)) ||
+    (!d.ref_externa && existsDivKey.get(d.simbolo, d.data_pagamento, d.corretora, d.conta ?? null, d.conta ?? null))
+  ).length;
+
+  const dupDeposits = deposits.filter(d =>
+    (d.ref_externa && existsDepRef.get(d.corretora, d.ref_externa)) ||
+    (!d.ref_externa && existsDepKey.get(d.data, d.valor, d.corretora, d.tipo, d.conta ?? null, d.conta ?? null))
+  ).length;
+
+  return { dupTrades, dupDividends, dupDeposits };
+}
+
 // ── Gravar no SQLite ──────────────────────────────────────
 function saveData(username, trades, dividends, deposits = []) {
   const db = getDb(username);
@@ -604,21 +783,25 @@ function saveData(username, trades, dividends, deposits = []) {
     INSERT OR IGNORE INTO trades
       (simbolo, data_abertura, data_fecho, pl_eur, volume, fees,
        valor_compra_eur, valor_venda_eur, moeda_original, categoria,
-       corretora, tipo_ordem, pais, ref_externa,
+       corretora, conta, conta_nome, tipo_ordem, pais, ref_externa,
        swap, rollover, gross_pl, taxa_cambio,
-       preco_abertura, preco_fecho, sl, tp, margin, comment)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+       preco_abertura, preco_fecho, sl, tp, margin, comment,
+       nome_instrumento, produto, origem, conversao_abertura, conversao_fecho)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 
   const insDiv = db.prepare(`
     INSERT OR IGNORE INTO dividendos
-      (simbolo, data_pagamento, valor_bruto_eur, retencao_eur, valor_liq_eur, pais_fonte, moeda, corretora, tipo)
-    VALUES (?,?,?,?,?,?,?,?,?)`);
+      (simbolo, data_pagamento, valor_bruto_eur, retencao_eur, valor_liq_eur, pais_fonte,
+       moeda, corretora, conta, conta_nome, ref_externa, nome_instrumento, produto, movimentos, tipo)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 
   const updDivPais = db.prepare(
     `UPDATE dividendos SET pais_fonte = ? WHERE simbolo = ? AND data_pagamento = ? AND corretora = ? AND pais_fonte IS NULL`);
 
-  const insDep = db.prepare(
-    `INSERT OR IGNORE INTO depositos (data, valor, tipo, corretora, descricao) VALUES (?,?,?,?,?)`);
+  const insDep = db.prepare(`
+    INSERT OR IGNORE INTO depositos
+      (data, valor, tipo, corretora, conta, conta_nome, ref_externa, nome_instrumento, produto, tipo_raw, descricao)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
 
   let insertedTrades = 0, insertedDivs = 0, insertedDeps = 0;
 
@@ -629,12 +812,14 @@ function saveData(username, trades, dividends, deposits = []) {
         t.simbolo, t.data_abertura, t.data_fecho, t.pl_eur,
         t.volume   ?? null, t.fees        ?? null,
         t.valor_compra_eur ?? null, t.valor_venda_eur ?? null,
-        t.moeda_original   ?? null, t.categoria, t.corretora,
+        t.moeda_original   ?? null, t.categoria, t.corretora, t.conta ?? null, t.conta_nome ?? null,
         t.tipo_ordem ?? null, t.pais ?? null, t.ref_externa ?? null,
         t.swap       ?? null, t.rollover    ?? null,
         t.gross_pl   ?? null, t.taxa_cambio ?? null,
         t.preco_abertura ?? null, t.preco_fecho ?? null,
-        t.sl ?? null, t.tp ?? null, t.margin ?? null, t.comment ?? null
+        t.sl ?? null, t.tp ?? null, t.margin ?? null, t.comment ?? null,
+        t.nome_instrumento ?? null, t.produto ?? null, t.origem ?? null,
+        t.conversao_abertura ?? null, t.conversao_fecho ?? null
       );
       insertedTrades += r.changes;
     }
@@ -642,7 +827,8 @@ function saveData(username, trades, dividends, deposits = []) {
       const r = insDiv.run(
         d.simbolo, d.data_pagamento, d.valor_bruto_eur,
         d.retencao_eur, d.valor_liq_eur,
-        d.pais_fonte ?? null, d.moeda ?? null, d.corretora,
+        d.pais_fonte ?? null, d.moeda ?? null, d.corretora, d.conta ?? null, d.conta_nome ?? null,
+        d.ref_externa ?? null, d.nome_instrumento ?? null, d.produto ?? null, d.movimentos ?? null,
         d.tipo ?? "DIVIDEND"
       );
       insertedDivs += r.changes;
@@ -651,7 +837,11 @@ function saveData(username, trades, dividends, deposits = []) {
       }
     }
     for (const d of deposits) {
-      const r = insDep.run(d.data, d.valor, d.tipo, d.corretora, d.descricao ?? null);
+      const r = insDep.run(
+        d.data, d.valor, d.tipo, d.corretora, d.conta ?? null, d.conta_nome ?? null,
+        d.ref_externa ?? null, d.nome_instrumento ?? null, d.produto ?? null,
+        d.tipo_raw ?? null, d.descricao ?? null
+      );
       insertedDeps += r.changes;
     }
     db.exec("COMMIT");
@@ -684,9 +874,14 @@ router.post("/preview", upload.single("file"), async (req, res) => {
     } else {
       return res.status(400).json({ error: "Tipo inválido." });
     }
+    const allRows = [...trades, ...dividends, ...deposits];
+    const contas     = [...new Set(allRows.map(x => x.conta).filter(Boolean))];
+    const contaNomes = [...new Set(allRows.map(x => x.conta_nome).filter(Boolean))];
+    const { dupTrades, dupDividends, dupDeposits } = countExisting(req.session.user.username, trades, dividends, deposits);
     res.json({
       nTrades: trades.length, nDividends: dividends.length, nDeposits: deposits.length,
-      convFailed, preview: trades.slice(0, 5),
+      nTradesNovas: trades.length - dupTrades, nDividendsNovas: dividends.length - dupDividends, nDepositsNovas: deposits.length - dupDeposits,
+      convFailed, preview: trades.slice(0, 5), contas, contaNomes,
     });
   } catch (e) {
     res.status(422).json({ error: e.message });
@@ -710,13 +905,16 @@ router.post("/confirm", upload.single("file"), async (req, res) => {
       return res.status(400).json({ error: "Tipo inválido." });
     }
     const stats = saveData(req.session.user.username, trades, dividends, deposits);
+    const allRows  = [...trades, ...dividends, ...deposits];
+    const contas     = [...new Set(allRows.map(x => x.conta).filter(Boolean))].join(", ") || null;
+    const contaNomes = [...new Set(allRows.map(x => x.conta_nome).filter(Boolean))].join(", ") || null;
     const db = getDb(req.session.user.username);
-    db.prepare(`INSERT INTO import_history (filename, corretora, n_trades, n_dividends, n_skipped)
-      VALUES (?,?,?,?,?)`)
-      .run(req.file.originalname, tipo.toUpperCase(), stats.insertedTrades, stats.insertedDivs, stats.skipped);
+    db.prepare(`INSERT INTO import_history (filename, corretora, n_trades, n_dividends, n_skipped, conta, conta_nome)
+      VALUES (?,?,?,?,?,?,?)`)
+      .run(req.file.originalname, tipo.toUpperCase(), stats.insertedTrades, stats.insertedDivs, stats.skipped, contas, contaNomes);
     res.json({
       ok: true, nTrades: stats.insertedTrades, nDividends: stats.insertedDivs,
-      nDeposits: stats.insertedDeps, nSkipped: stats.skipped, convFailed,
+      nDeposits: stats.insertedDeps, nSkipped: stats.skipped, convFailed, conta: contas, contaNome: contaNomes,
     });
   } catch (e) {
     res.status(422).json({ error: e.message });

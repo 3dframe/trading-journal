@@ -38,7 +38,7 @@ router.get("/summary", (req, res) => {
     // A) Anexo G Q9 — Ações nacionais (Portugal, exceto EDPR)
     const gQ9 = db.prepare(`
       SELECT simbolo, data_abertura, data_fecho, pl_eur,
-             valor_compra_eur, valor_venda_eur, fees, pais, corretora, taxa_cambio
+             valor_compra_eur, valor_venda_eur, fees, pais, corretora, conta, taxa_cambio
       FROM   trades
       WHERE  strftime('%Y', data_fecho) = ?
         AND  categoria = 'STOCK'
@@ -50,7 +50,7 @@ router.get("/summary", (req, res) => {
     // B) Anexo J Q9.2A — Mais-valias estrangeiras (stocks não-PT + EDPR)
     const jQ92A = db.prepare(`
       SELECT simbolo, data_abertura, data_fecho, pl_eur,
-             valor_compra_eur, valor_venda_eur, fees, pais, corretora, moeda_original, taxa_cambio
+             valor_compra_eur, valor_venda_eur, fees, pais, corretora, conta, moeda_original, taxa_cambio
       FROM   trades
       WHERE  strftime('%Y', data_fecho) = ?
         AND  categoria = 'STOCK'
@@ -61,7 +61,7 @@ router.get("/summary", (req, res) => {
     // C) Anexo J Q9.2B — Derivados: CFDs e Opções
     const jQ92BRaw = db.prepare(`
       SELECT simbolo, data_abertura, data_fecho, pl_eur,
-             valor_compra_eur, valor_venda_eur, fees, pais, corretora, categoria,
+             valor_compra_eur, valor_venda_eur, fees, pais, corretora, conta, categoria,
              COALESCE(swap,    0) AS swap,
              COALESCE(rollover,0) AS rollover,
              COALESCE(gross_pl, pl_eur) AS gross_pl,
@@ -91,7 +91,7 @@ router.get("/summary", (req, res) => {
     // D) Anexo J Q8 — Dividendos e Juros
     const jQ8Linhas = db.prepare(`
       SELECT simbolo, data_pagamento, valor_bruto_eur, retencao_eur, valor_liq_eur,
-             pais_fonte, moeda, corretora, COALESCE(tipo,'DIVIDEND') AS tipo
+             pais_fonte, moeda, corretora, conta, COALESCE(tipo,'DIVIDEND') AS tipo
       FROM   dividendos
       WHERE  strftime('%Y', data_pagamento) = ?
       ORDER BY tipo ASC, pais_fonte ASC, data_pagamento ASC
@@ -202,7 +202,7 @@ router.get("/export", async (req, res) => {
 
     // ── A) Anexo G Q9 ──
     const gQ9Rows = db.prepare(`
-      SELECT simbolo, data_abertura, data_fecho,
+      SELECT simbolo, data_abertura, data_fecho, COALESCE(conta,'—') AS conta,
              ABS(COALESCE(valor_compra_eur,0)) AS vaq,
              ABS(COALESCE(valor_venda_eur,0))  AS vreal,
              ABS(COALESCE(fees,0))              AS desp,
@@ -214,6 +214,7 @@ router.get("/export", async (req, res) => {
 
     buildSheet("AnexoG · Q9 (Ações Nac.)", [
       { h: "Cód. Ativo",            key: "simbolo",      w: 14 },
+      { h: "Conta",                 key: "conta",        w: 14 },
       { h: "Data Aquisição",        key: "data_abertura",w: 16, fmt: fmtDate },
       { h: "Valor Aquisição €",     key: "vaq",          w: 18, fmt: fmtEUR  },
       { h: "Data Realização",       key: "data_fecho",   w: 16, fmt: fmtDate },
@@ -224,7 +225,7 @@ router.get("/export", async (req, res) => {
 
     // ── B) Anexo J Q9.2A ──
     const jQ92ARows = db.prepare(`
-      SELECT simbolo, data_abertura, data_fecho, COALESCE(pais,'?') AS pais,
+      SELECT simbolo, data_abertura, data_fecho, COALESCE(pais,'?') AS pais, COALESCE(conta,'—') AS conta,
              ABS(COALESCE(valor_compra_eur,0)) AS vaq,
              ABS(COALESCE(valor_venda_eur,0))  AS vreal,
              ABS(COALESCE(fees,0))              AS desp,
@@ -238,6 +239,7 @@ router.get("/export", async (req, res) => {
       { h: "País (Cód. AT)",        key: "pais_codigo",  w: 14 },
       { h: "País (nome)",           key: "pais",         w: 20 },
       { h: "Cód. Ativo",            key: "simbolo",      w: 14 },
+      { h: "Conta",                 key: "conta",        w: 14 },
       { h: "Data Aquisição",        key: "data_abertura",w: 16, fmt: fmtDate },
       { h: "Valor Aquisição €",     key: "vaq",          w: 18, fmt: fmtEUR  },
       { h: "Data Realização",       key: "data_fecho",   w: 16, fmt: fmtDate },
@@ -248,7 +250,7 @@ router.get("/export", async (req, res) => {
 
     // ── C) Anexo J Q9.2B — Resumo por país ──
     const jQ92BRaw = db.prepare(`
-      SELECT simbolo, data_fecho, COALESCE(pais,'Desconhecido') AS pais, categoria,
+      SELECT simbolo, data_fecho, COALESCE(pais,'Desconhecido') AS pais, categoria, COALESCE(conta,'—') AS conta,
              COALESCE(gross_pl, pl_eur) AS gross_pl,
              COALESCE(swap,0) AS swap, COALESCE(rollover,0) AS rollover,
              ABS(COALESCE(fees,0)) AS fees, pl_eur
@@ -281,6 +283,7 @@ router.get("/export", async (req, res) => {
       { h: "Símbolo",         key: "simbolo",     w: 14 },
       { h: "Categoria",       key: "categoria",   w: 12 },
       { h: "País",            key: "pais",        w: 20 },
+      { h: "Conta",           key: "conta",       w: 14 },
       { h: "Data Fecho",      key: "data_fecho",  w: 16, fmt: fmtDate },
       { h: "Gross P/L €",     key: "gross_pl",    w: 14, fmt: fmtEUR  },
       { h: "Swap €",          key: "swap",        w: 12, fmt: fmtEUR  },
@@ -292,7 +295,8 @@ router.get("/export", async (req, res) => {
     // ── D) Anexo J Q8 — Dividendos e Juros ──
     const q8Rows = db.prepare(`
       SELECT simbolo, data_pagamento, valor_bruto_eur, retencao_eur, valor_liq_eur,
-             COALESCE(pais_fonte,'Desconhecido') AS pais_fonte,
+             COALESCE(pais_fonte,'Desconhecido') AS pais_fonte, COALESCE(conta,'—') AS conta,
+             COALESCE(ref_externa,'—') AS ref_externa,
              moeda, corretora, COALESCE(tipo,'DIVIDEND') AS tipo
       FROM dividendos WHERE strftime('%Y',data_pagamento)=?
       ORDER BY tipo, pais_fonte, data_pagamento
@@ -303,10 +307,12 @@ router.get("/export", async (req, res) => {
       { h: "País (nome)",      key: "pais_fonte",       w: 20 },
       { h: "Cód. Rendimento",  key: "cod",              w: 16 },
       { h: "Símbolo",          key: "simbolo",          w: 14 },
+      { h: "Conta",            key: "conta",            w: 14 },
       { h: "Data Pagamento",   key: "data_pagamento",   w: 16, fmt: fmtDate },
       { h: "Rendimento Bruto €", key: "valor_bruto_eur",w: 20, fmt: fmtEUR  },
       { h: "Imposto Retido €", key: "retencao_eur",     w: 18, fmt: fmtEUR  },
       { h: "Valor Líquido €",  key: "valor_liq_eur",    w: 16, fmt: fmtEUR  },
+      { h: "Refs. Operação",  key: "ref_externa",       w: 22 },
     ], q8Rows, null);
 
     // Resumo Q8 por país + tipo

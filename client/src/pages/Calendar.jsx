@@ -14,7 +14,7 @@ const B   = "#4f6af5";
 const T   = "#14b8a6";
 const MUT = "var(--mute)";
 
-const fmtPL  = v => (v >= 0 ? "+" : "−") + "€ " + Math.abs(v).toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtPL  = v => (v >= 0 ? "+" : "−") + "€ " + Math.abs(v).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtPct = v => v.toFixed(0) + "%";
 
 function isoWeek(year, month, day) {
@@ -77,7 +77,7 @@ function StatsBar({ stats }) {
   const items = [
     { label: "NET P&L",   value: fmtPL(stats.netPL),   color: stats.netPL   >= 0 ? G : R },
     { label: "GROSS P&L", value: fmtPL(stats.grossPL), color: stats.grossPL >= 0 ? G : R },
-    { label: "COMISSÕES", value: stats.fees > 0 ? "−€ " + stats.fees.toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "€ 0,00", color: stats.fees > 0 ? R : MUT },
+    { label: "COMISSÕES", value: stats.fees > 0 ? "−€ " + stats.fees.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "€ 0,00", color: stats.fees > 0 ? R : MUT },
     { label: "DIAS +",    value: stats.winDays,         color: "var(--text)" },
     { label: "TRADES",    value: stats.trades,          color: "var(--text)" },
     { label: "WIN RATE",  value: fmtPct(stats.winRate), color: stats.winRate >= 50 ? G : R },
@@ -94,54 +94,87 @@ function StatsBar({ stats }) {
   );
 }
 
-// ── Painel de trades (dia ou mês) ──────────────────────────────
-function TradesPanel({ title, trades, expanded, onExpand, panelRef }) {
+// ── Painel de trades + dividendos (dia ou mês) ──────────────────
+function TradesPanel({ title, trades, divs = [], expanded, onExpand, panelRef }) {
+  const divTotal = divs.reduce((s, d) => s + (d.valor_liq_eur || 0), 0);
   return (
     <div ref={panelRef} style={{ marginTop: 20 }}>
       <div style={{ fontSize: "0.7rem", fontWeight: 700, color: MUT, textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 10 }}>
-        {title} · {trades.length} trade{trades.length !== 1 ? "s" : ""}
+        {title}
+        {trades.length > 0 && ` · ${trades.length} trade${trades.length !== 1 ? "s" : ""}`}
+        {divs.length > 0   && ` · ${divs.length} dividendo${divs.length !== 1 ? "s" : ""}`}
       </div>
-      <table className="data-table">
-        <thead><tr>
-          <th>Símbolo</th><th>Categoria</th><th>Corretora</th>
-          <th>Abertura</th><th>Fecho</th><th style={{ textAlign: "right" }}>P&amp;L €</th>
-        </tr></thead>
-        <tbody>
-          {trades.map(t => {
-            const isOpen = expanded === t.id;
-            const pl     = t.pl_eur ?? 0;
-            return (
-              <Fragment key={t.id}>
-                <tr style={{ cursor: "pointer", background: isOpen ? "rgba(255,255,255,0.03)" : undefined }}
-                  onClick={() => onExpand(t.id)}>
-                  <td style={{ fontWeight: 700, color: "var(--text)" }}>
-                    <span style={{ marginRight: 6, fontSize: 10, opacity: .5 }}>{isOpen ? "▲" : "▼"}</span>
-                    {t.simbolo}
-                  </td>
-                  <td style={{ color: t.categoria === "CFD" ? R : undefined, fontWeight: t.categoria === "CFD" ? 700 : undefined }}>{t.categoria}</td>
-                  <td>{t.corretora}</td>
-                  <td style={{ fontSize: 11 }}>{t.data_abertura?.slice(0,19)?.replace("T"," ")}</td>
-                  <td style={{ fontSize: 11 }}>{t.data_fecho?.slice(0,19)?.replace("T"," ")}</td>
-                  <td style={{ textAlign: "right", fontWeight: 700, color: pl >= 0 ? G : R }}>{fmtPL(pl)}</td>
-                </tr>
-                {isOpen && (
-                  <tr>
-                    <td colSpan={6} style={{ padding: "0 0 12px", background: "rgba(255,255,255,0.02)" }}>
-                      <TradeDetail t={t} />
+      {trades.length > 0 && (
+        <table className="data-table" style={{ marginBottom: divs.length > 0 ? 16 : 0 }}>
+          <thead><tr>
+            <th>Símbolo</th><th>Categoria</th><th>Corretora</th>
+            <th>Abertura</th><th>Fecho</th><th style={{ textAlign: "right" }}>P&amp;L €</th>
+          </tr></thead>
+          <tbody>
+            {trades.map(t => {
+              const isOpen = expanded === t.id;
+              const pl     = t.pl_eur ?? 0;
+              return (
+                <Fragment key={t.id}>
+                  <tr style={{ cursor: "pointer", background: isOpen ? "rgba(255,255,255,0.03)" : undefined }}
+                    onClick={() => onExpand(t.id)}>
+                    <td style={{ fontWeight: 700, color: "var(--text)" }}>
+                      <span style={{ marginRight: 6, fontSize: 10, opacity: .5 }}>{isOpen ? "▲" : "▼"}</span>
+                      {t.simbolo}
                     </td>
+                    <td style={{ color: t.categoria === "CFD" ? R : undefined, fontWeight: t.categoria === "CFD" ? 700 : undefined }}>{t.categoria}</td>
+                    <td>{t.corretora}</td>
+                    <td style={{ fontSize: 11 }}>{t.data_abertura?.slice(0,19)?.replace("T"," ")}</td>
+                    <td style={{ fontSize: 11 }}>{t.data_fecho?.slice(0,19)?.replace("T"," ")}</td>
+                    <td style={{ textAlign: "right", fontWeight: 700, color: pl >= 0 ? G : R }}>{fmtPL(pl)}</td>
                   </tr>
-                )}
-              </Fragment>
-            );
-          })}
-        </tbody>
-      </table>
+                  {isOpen && (
+                    <tr>
+                      <td colSpan={6} style={{ padding: "0 0 12px", background: "rgba(255,255,255,0.02)" }}>
+                        <TradeDetail t={t} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+      {divs.length > 0 && (
+        <table className="data-table">
+          <thead><tr>
+            <th>Símbolo</th><th>Corretora</th><th>Conta</th><th>País Fonte</th>
+            <th style={{ textAlign: "right" }}>Bruto €</th><th style={{ textAlign: "right" }}>Retenção €</th>
+            <th style={{ textAlign: "right" }}>Líquido €</th>
+          </tr></thead>
+          <tbody>
+            {divs.map((d, i) => (
+              <tr key={i}>
+                <td style={{ fontWeight: 700, color: "var(--text)" }}>{d.simbolo}</td>
+                <td>{d.corretora}</td>
+                <td style={{ fontSize: 11 }}>{d.conta || "—"}</td>
+                <td>{d.pais_fonte || "—"}</td>
+                <td style={{ textAlign: "right", color: G }}>{fmtPL(d.valor_bruto_eur || 0).replace("+", "")}</td>
+                <td style={{ textAlign: "right", color: R }}>{(d.retencao_eur || 0).toFixed(2)}</td>
+                <td style={{ textAlign: "right", fontWeight: 700, color: G }}>{fmtPL(d.valor_liq_eur || 0).replace("+", "")}</td>
+              </tr>
+            ))}
+            {divs.length > 1 && (
+              <tr style={{ borderTop: "1px solid var(--border)" }}>
+                <td colSpan={6} style={{ fontWeight: 700, color: "var(--text)" }}>Total</td>
+                <td style={{ textAlign: "right", fontWeight: 700, color: G }}>{fmtPL(divTotal).replace("+", "")}</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }
 
 // ── Vista de Ano ────────────────────────────────────────────────
-function YearView({ ano, setAno, yearData, selectedMonth, onMonthClick }) {
+function YearView({ ano, setAno, yearData, divsByMonth, selectedMonth, onMonthClick }) {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
@@ -151,26 +184,32 @@ function YearView({ ano, setAno, yearData, selectedMonth, onMonthClick }) {
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
         {MONTHS_SHORT.map((m, i) => {
-          const mNum = i + 1;
-          const d    = yearData[mNum] || {};
-          const pl   = d.pl || 0;
-          const isSel = selectedMonth === mNum;
+          const mNum   = i + 1;
+          const d      = yearData[mNum] || {};
+          const div    = divsByMonth?.[mNum];
+          const hasData = !!d.trades || !!div;
+          const pl     = (d.pl || 0) + (div?.valor || 0);
+          const isSel  = selectedMonth === mNum;
           return (
-            <div key={i} onClick={() => d.trades && onMonthClick(mNum)}
+            <div key={i} onClick={() => hasData && onMonthClick(mNum)}
               style={{
                 background: isSel ? "rgba(79,106,245,0.12)" : pl > 0 ? "rgba(16,185,129,0.07)" : pl < 0 ? "rgba(244,63,94,0.07)" : "var(--card)",
                 border: `${isSel ? 2 : 1}px solid ${isSel ? B : pl > 0 ? "rgba(16,185,129,0.35)" : pl < 0 ? "rgba(244,63,94,0.3)" : "var(--border)"}`,
                 borderRadius: 10, padding: "16px 14px",
-                cursor: d.trades ? "pointer" : "default",
+                cursor: hasData ? "pointer" : "default",
                 transition: "border-color .2s",
               }}
-              onMouseEnter={e => { if (d.trades) e.currentTarget.style.borderColor = pl > 0 ? G : pl < 0 ? R : "rgba(255,255,255,0.2)"; }}
-              onMouseLeave={e => { if (d.trades) e.currentTarget.style.borderColor = isSel ? B : pl > 0 ? "rgba(16,185,129,0.35)" : pl < 0 ? "rgba(244,63,94,0.3)" : "var(--border)"; }}>
+              onMouseEnter={e => { if (hasData) e.currentTarget.style.borderColor = pl > 0 ? G : pl < 0 ? R : "rgba(255,255,255,0.2)"; }}
+              onMouseLeave={e => { if (hasData) e.currentTarget.style.borderColor = isSel ? B : pl > 0 ? "rgba(16,185,129,0.35)" : pl < 0 ? "rgba(244,63,94,0.3)" : "var(--border)"; }}>
               <div style={{ fontSize: "0.7rem", fontWeight: 700, color: isSel ? B : MUT, textTransform: "uppercase", marginBottom: 8 }}>{m}</div>
-              {d.trades ? (
+              {hasData ? (
                 <>
                   <div style={{ fontWeight: 800, fontSize: "1.05rem", color: pl >= 0 ? G : R }}>{fmtPL(pl)}</div>
-                  <div style={{ fontSize: 11, color: MUT, marginTop: 4 }}>{d.trades} trade{d.trades !== 1 ? "s" : ""}</div>
+                  <div style={{ fontSize: 11, color: MUT, marginTop: 4 }}>
+                    {d.trades ? `${d.trades} trade${d.trades !== 1 ? "s" : ""}` : null}
+                    {d.trades && div ? " · " : null}
+                    {div ? <span style={{ color: G }}>💰 {div.n}</span> : null}
+                  </div>
                 </>
               ) : (
                 <div style={{ fontSize: "0.78rem", color: MUT }}>Sem dados</div>
@@ -184,7 +223,7 @@ function YearView({ ano, setAno, yearData, selectedMonth, onMonthClick }) {
 }
 
 // ── Vista de Semana ─────────────────────────────────────────────
-function WeekView({ weekOffset, setWeekOffset, calData, onSelectDay, selected }) {
+function WeekView({ weekOffset, setWeekOffset, calData, divsByDay, onSelectDay, selected }) {
   const today    = new Date();
   const todayStr = today.toISOString().slice(0, 10);
   const baseDate = new Date(today);
@@ -221,25 +260,32 @@ function WeekView({ weekOffset, setWeekOffset, calData, onSelectDay, selected })
         {weekDays.map(d => {
           const ds      = d.toISOString().slice(0, 10);
           const data    = calData[ds];
+          const div     = divsByDay?.[ds];
+          const hasData = !!data || !!div;
+          const dayPl   = (data?.pl || 0) + (div?.valor || 0);
           const isToday = ds === todayStr;
           const isSel   = selected === ds;
           return (
-            <div key={ds} onClick={() => data && onSelectDay(ds)}
+            <div key={ds} onClick={() => hasData && onSelectDay(ds)}
               style={{ minHeight: 110, borderRadius: 8, padding: "10px 10px 8px",
-                cursor: data ? "pointer" : "default",
-                background: data ? (data.pl >= 0 ? "rgba(16,185,129,0.1)" : "rgba(244,63,94,0.1)") : "rgba(0,0,0,0.18)",
-                border: `${isToday ? 2 : 1}px solid ${isToday ? T : isSel ? B : data ? (data.pl >= 0 ? "rgba(16,185,129,0.3)" : "rgba(244,63,94,0.25)") : "rgba(255,255,255,0.04)"}`,
+                cursor: hasData ? "pointer" : "default",
+                background: hasData ? (dayPl >= 0 ? "rgba(16,185,129,0.1)" : "rgba(244,63,94,0.1)") : "rgba(0,0,0,0.18)",
+                border: `${isToday ? 2 : 1}px solid ${isToday ? T : isSel ? B : hasData ? (dayPl >= 0 ? "rgba(16,185,129,0.3)" : "rgba(244,63,94,0.25)") : "rgba(255,255,255,0.04)"}`,
                 transition: "border-color .2s" }}
-              onMouseEnter={e => { if (data) e.currentTarget.style.borderColor = data.pl >= 0 ? G : R; }}
+              onMouseEnter={e => { if (hasData) e.currentTarget.style.borderColor = dayPl >= 0 ? G : R; }}
               onMouseLeave={e => {
-                if (!data) return;
-                e.currentTarget.style.borderColor = isToday ? T : isSel ? B : data.pl >= 0 ? "rgba(16,185,129,0.3)" : "rgba(244,63,94,0.25)";
+                if (!hasData) return;
+                e.currentTarget.style.borderColor = isToday ? T : isSel ? B : dayPl >= 0 ? "rgba(16,185,129,0.3)" : "rgba(244,63,94,0.25)";
               }}>
               <div style={{ fontSize: "0.67rem", color: isToday ? T : MUT, fontWeight: isToday ? 700 : 400 }}>{d.getDate()}</div>
-              {data && (
+              {hasData && (
                 <div style={{ marginTop: 8 }}>
-                  <div style={{ fontWeight: 700, fontSize: "0.85rem", color: data.pl >= 0 ? G : R }}>{fmtPL(data.pl)}</div>
-                  <div style={{ fontSize: 10, color: MUT, marginTop: 2 }}>{data.n_trades} trade{data.n_trades !== 1 ? "s" : ""}</div>
+                  <div style={{ fontWeight: 700, fontSize: "0.85rem", color: dayPl >= 0 ? G : R }}>{fmtPL(dayPl)}</div>
+                  <div style={{ fontSize: 10, color: MUT, marginTop: 2 }}>
+                    {data ? `${data.n_trades} trade${data.n_trades !== 1 ? "s" : ""}` : null}
+                    {data && div ? " · " : null}
+                    {div ? <span style={{ color: G }}>💰 {div.n}</span> : null}
+                  </div>
                 </div>
               )}
             </div>
@@ -272,9 +318,11 @@ export default function Calendar() {
   const [calData,       setCalData]       = useState({});
   const [yearData,      setYearData]      = useState({});
   const [yearTrades,    setYearTrades]    = useState([]);
+  const [yearDivs,      setYearDivs]      = useState([]);
   const [selected,      setSelected]      = useState(null);   // dia selecionado (vista mês/semana)
   const [selectedMonth, setSelectedMonth] = useState(null);   // mês selecionado (vista ano)
   const [shownTrades,   setShownTrades]   = useState([]);
+  const [shownDivs,     setShownDivs]     = useState([]);
   const [expanded,      setExpanded]      = useState(null);
   const [initialized,   setInitialized]   = useState(false);
 
@@ -287,20 +335,12 @@ export default function Calendar() {
     }).catch(() => {});
   }, []);
 
-  // ── Quando yearData carrega pela primeira vez, saltar para o último mês com dados ──
-  useEffect(() => {
-    if (initialized) return;
-    const months = Object.keys(yearData).map(Number).filter(m => yearData[m]?.trades > 0);
-    if (!months.length) return;
-    setMes(Math.max(...months));
-    setInitialized(true);
-  }, [yearData, initialized]);
-
   // ── Reset de seleção quando o ano muda ──
   useEffect(() => {
     setSelected(null);
     setSelectedMonth(null);
     setShownTrades([]);
+    setShownDivs([]);
     setExpanded(null);
   }, [ano]);
 
@@ -316,6 +356,7 @@ export default function Calendar() {
         setCalData(map);
         setSelected(null);
         setShownTrades([]);
+        setShownDivs([]);
       }).catch(() => {});
     return () => { ignore = true; };
   }, [ano, mes, view]);
@@ -343,12 +384,58 @@ export default function Calendar() {
     return () => { ignore = true; };
   }, [ano]);
 
-  // ── Scroll automático para o painel de trades ──
+  // ── Dividendos do ano (com abort) ──
   useEffect(() => {
-    if (shownTrades.length > 0 && panelRef.current) {
+    let ignore = false;
+    axios.get(`/api/dividends?ano=${ano}`)
+      .then(r => { if (!ignore) setYearDivs(r.data); })
+      .catch(() => {});
+    return () => { ignore = true; };
+  }, [ano]);
+
+  // ── Dividendos agrupados por dia (para a grelha mês/semana) ──
+  const divsByDay = useMemo(() => {
+    const map = {};
+    yearDivs.forEach(d => {
+      const ds = d.data_pagamento?.slice(0, 10);
+      if (!ds) return;
+      if (!map[ds]) map[ds] = { valor: 0, n: 0 };
+      map[ds].valor += d.valor_liq_eur || 0;
+      map[ds].n++;
+    });
+    return map;
+  }, [yearDivs]);
+
+  // ── Dividendos agrupados por mês (para a grelha de ano) ──
+  const divsByMonth = useMemo(() => {
+    const map = {};
+    yearDivs.forEach(d => {
+      const m = parseInt(d.data_pagamento?.slice(5, 7));
+      if (!m) return;
+      if (!map[m]) map[m] = { valor: 0, n: 0 };
+      map[m].valor += d.valor_liq_eur || 0;
+      map[m].n++;
+    });
+    return map;
+  }, [yearDivs]);
+
+  // ── Quando yearData/yearDivs carregam pela primeira vez, saltar para o último mês com dados ──
+  useEffect(() => {
+    if (initialized) return;
+    const monthsTrades = Object.keys(yearData).map(Number).filter(m => yearData[m]?.trades > 0);
+    const monthsDivs   = Object.keys(divsByMonth).map(Number);
+    const months = [...new Set([...monthsTrades, ...monthsDivs])];
+    if (!months.length) return;
+    setMes(Math.max(...months));
+    setInitialized(true);
+  }, [yearData, divsByMonth, initialized]);
+
+  // ── Scroll automático para o painel de trades/dividendos ──
+  useEffect(() => {
+    if ((shownTrades.length > 0 || shownDivs.length > 0) && panelRef.current) {
       panelRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-  }, [shownTrades]);
+  }, [shownTrades, shownDivs]);
 
   // ── Stats mensais ──
   const stats = useMemo(() => {
@@ -366,21 +453,23 @@ export default function Calendar() {
 
   // ── Selecionar dia (vista mês / semana) ──
   const selectDay = ds => {
-    if (selected === ds) { setSelected(null); setShownTrades([]); return; }
+    if (selected === ds) { setSelected(null); setShownTrades([]); setShownDivs([]); return; }
     setSelected(ds);
     setSelectedMonth(null);
     setExpanded(null);
     setShownTrades(yearTrades.filter(t => t.data_fecho?.startsWith(ds)));
+    setShownDivs(yearDivs.filter(d => d.data_pagamento?.startsWith(ds)));
   };
 
   // ── Selecionar mês (vista ano) — mostra trades inline ──
   const selectMonth = m => {
-    if (selectedMonth === m) { setSelectedMonth(null); setShownTrades([]); return; }
+    if (selectedMonth === m) { setSelectedMonth(null); setShownTrades([]); setShownDivs([]); return; }
     setSelectedMonth(m);
     setSelected(null);
     setExpanded(null);
     const monthStr = String(m).padStart(2, "0");
     setShownTrades(yearTrades.filter(t => t.data_fecho?.startsWith(`${ano}-${monthStr}`)));
+    setShownDivs(yearDivs.filter(d => d.data_pagamento?.startsWith(`${ano}-${monthStr}`)));
   };
 
   // ── Navegar mês ──
@@ -430,13 +519,14 @@ export default function Calendar() {
       {/* ── Vista ANO ── */}
       {view === "year" && (
         <>
-          <YearView ano={ano} setAno={setAno} yearData={yearData}
+          <YearView ano={ano} setAno={setAno} yearData={yearData} divsByMonth={divsByMonth}
             selectedMonth={selectedMonth} onMonthClick={selectMonth} />
-          {shownTrades.length > 0 && (
+          {(shownTrades.length > 0 || shownDivs.length > 0) && (
             <TradesPanel
               panelRef={panelRef}
               title={panelTitle}
               trades={shownTrades}
+              divs={shownDivs}
               expanded={expanded}
               onExpand={id => setExpanded(p => p === id ? null : id)}
             />
@@ -448,12 +538,13 @@ export default function Calendar() {
       {view === "week" && (
         <>
           <WeekView weekOffset={weekOffset} setWeekOffset={setWeekOffset}
-            calData={calData} onSelectDay={selectDay} selected={selected} />
-          {shownTrades.length > 0 && (
+            calData={calData} divsByDay={divsByDay} onSelectDay={selectDay} selected={selected} />
+          {(shownTrades.length > 0 || shownDivs.length > 0) && (
             <TradesPanel
               panelRef={panelRef}
               title={panelTitle}
               trades={shownTrades}
+              divs={shownDivs}
               expanded={expanded}
               onExpand={id => setExpanded(p => p === id ? null : id)}
             />
@@ -503,35 +594,41 @@ export default function Calendar() {
                     );
                     const ds        = diaStr(d);
                     const data      = calData[ds];
+                    const div       = divsByDay[ds];
                     const isToday   = ds === todayStr;
                     const isSel     = selected === ds;
-                    const hasTrades = !!data;
+                    const hasData   = !!data || !!div;
+                    const dayPl     = (data?.pl || 0) + (div?.valor || 0);
 
                     let bg      = "var(--card)";
                     let bdColor = "var(--border)";
                     let bdWidth = 1;
 
-                    if (isToday)           { bdColor = T; bdWidth = 2; }
-                    else if (isSel)        { bdColor = B; bdWidth = 2; }
-                    else if (data?.pl > 0) bdColor = "rgba(16,185,129,0.3)";
-                    else if (data?.pl < 0) bdColor = "rgba(244,63,94,0.25)";
+                    if (isToday)         { bdColor = T; bdWidth = 2; }
+                    else if (isSel)      { bdColor = B; bdWidth = 2; }
+                    else if (hasData && dayPl > 0) bdColor = "rgba(16,185,129,0.3)";
+                    else if (hasData && dayPl < 0) bdColor = "rgba(244,63,94,0.25)";
 
-                    if (data?.pl > 0)      bg = "rgba(16,185,129,0.1)";
-                    else if (data?.pl < 0) bg = "rgba(244,63,94,0.09)";
+                    if (hasData && dayPl > 0)      bg = "rgba(16,185,129,0.1)";
+                    else if (hasData && dayPl < 0) bg = "rgba(244,63,94,0.09)";
 
                     return (
-                      <div key={ds} onClick={() => hasTrades && selectDay(ds)}
+                      <div key={ds} onClick={() => hasData && selectDay(ds)}
                         style={{ minHeight: 110, borderRadius: 8, padding: "10px 10px 8px",
                           background: bg, border: `${bdWidth}px solid ${bdColor}`,
-                          cursor: hasTrades ? "pointer" : "default",
+                          cursor: hasData ? "pointer" : "default",
                           transition: "border-color .2s", display: "flex", flexDirection: "column" }}
-                        onMouseEnter={e => { if (hasTrades) e.currentTarget.style.borderColor = data.pl >= 0 ? G : R; }}
-                        onMouseLeave={e => { if (hasTrades) e.currentTarget.style.borderColor = bdColor; }}>
+                        onMouseEnter={e => { if (hasData) e.currentTarget.style.borderColor = dayPl >= 0 ? G : R; }}
+                        onMouseLeave={e => { if (hasData) e.currentTarget.style.borderColor = bdColor; }}>
                         <div style={{ fontSize: "0.67rem", fontWeight: isToday ? 700 : 400, color: isToday ? T : MUT, alignSelf: "flex-start" }}>{d}</div>
-                        {data && (
+                        {hasData && (
                           <div style={{ marginTop: "auto", paddingTop: 8 }}>
-                            <div style={{ fontWeight: 800, fontSize: "0.88rem", color: data.pl >= 0 ? G : R, lineHeight: 1.2 }}>{fmtPL(data.pl)}</div>
-                            <div style={{ fontSize: "0.68rem", color: MUT, marginTop: 3 }}>{data.n_trades} trade{data.n_trades !== 1 ? "s" : ""}</div>
+                            <div style={{ fontWeight: 800, fontSize: "0.88rem", color: dayPl >= 0 ? G : R, lineHeight: 1.2 }}>{fmtPL(dayPl)}</div>
+                            <div style={{ fontSize: "0.68rem", color: MUT, marginTop: 3 }}>
+                              {data ? `${data.n_trades} trade${data.n_trades !== 1 ? "s" : ""}` : null}
+                              {data && div ? " · " : null}
+                              {div ? <span style={{ color: G }}>💰 {div.n}</span> : null}
+                            </div>
                           </div>
                         )}
                       </div>
@@ -542,11 +639,12 @@ export default function Calendar() {
             });
           })()}
 
-          {shownTrades.length > 0 && (
+          {(shownTrades.length > 0 || shownDivs.length > 0) && (
             <TradesPanel
               panelRef={panelRef}
               title={panelTitle}
               trades={shownTrades}
+              divs={shownDivs}
               expanded={expanded}
               onExpand={id => setExpanded(p => p === id ? null : id)}
             />

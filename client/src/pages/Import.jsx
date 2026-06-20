@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
 
 const fmt = v => v == null ? "—"
-  : (v >= 0 ? "+" : "") + "€ " + Math.abs(v).toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  : (v >= 0 ? "+" : "") + "€ " + Math.abs(v).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const BROKERS = [
   {
@@ -95,7 +95,7 @@ function HistoryTable({ history, onDelete }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
         <thead>
           <tr>
-            {["Corretora", "Ficheiro", "Operações", "Dividendos", "Ignorados", "Data Importação", ""].map(h => (
+            {["Corretora", "Conta", "Ficheiro", "Operações", "Dividendos", "Ignorados", "Data Importação", ""].map(h => (
               <th key={h} style={{
                 padding: "8px 12px", textAlign: h === "Operações" || h === "Dividendos" || h === "Ignorados" ? "center" : "left",
                 background: "var(--hover)", color: "var(--muted)", fontWeight: 700,
@@ -114,6 +114,9 @@ function HistoryTable({ history, onDelete }) {
                   background: `${BROKER_COLOR[h.corretora] ?? "var(--accent)"}22`,
                   color: BROKER_COLOR[h.corretora] ?? "var(--accent)",
                 }}>{h.corretora}</span>
+              </td>
+              <td style={{ padding: "9px 12px", color: "var(--muted)", whiteSpace: "nowrap" }}>
+                {h.conta || "—"}{h.conta_nome ? ` (${h.conta_nome})` : ""}
               </td>
               <td style={{ padding: "9px 12px", color: "var(--text)", fontWeight: 600,
                 maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
@@ -285,8 +288,16 @@ export default function Import() {
 
       {/* Botão pré-visualizar */}
       {file && !preview && (
-        <button className="btn btn-primary" onClick={doPreview} disabled={loading}
-          style={{ width: "100%", padding: "11px", fontSize: "0.9rem", marginBottom: 8 }}>
+        <button onClick={doPreview} disabled={loading} style={{
+          width: "100%", padding: "11px", borderRadius: 8, marginBottom: 8,
+          border: "1px solid rgba(96,165,250,0.35)", background: "rgba(96,165,250,0.12)",
+          color: "#60a5fa", fontSize: "0.9rem", fontWeight: 700,
+          cursor: loading ? "default" : "pointer", opacity: loading ? 0.6 : 1,
+          transition: "background .15s, transform .15s",
+        }}
+          onMouseEnter={e => { if (!loading) { e.currentTarget.style.background = "rgba(96,165,250,0.22)"; e.currentTarget.style.transform = "translateY(-1px)"; } }}
+          onMouseLeave={e => { e.currentTarget.style.background = "rgba(96,165,250,0.12)"; e.currentTarget.style.transform = "translateY(0)"; }}
+        >
           {loading ? "A analisar..." : "Pré-visualizar"}
         </button>
       )}
@@ -305,6 +316,26 @@ export default function Import() {
               {preview.nDeposits > 0 &&
                 <span>🏦 <strong style={{ color: "var(--text)" }}>{preview.nDeposits}</strong> depósitos/levantamentos</span>}
             </div>
+            {(() => {
+              const totalNovas = (preview.nTradesNovas ?? preview.nTrades) + (preview.nDividendsNovas ?? preview.nDividends) + (preview.nDepositsNovas ?? preview.nDeposits);
+              const totalFicheiro = preview.nTrades + preview.nDividends + preview.nDeposits;
+              const totalDuplicadas = totalFicheiro - totalNovas;
+              if (totalDuplicadas <= 0) return null;
+              return (
+                <div style={{ marginTop: 10, fontSize: "0.78rem", color: totalNovas === 0 ? "#f59e0b" : "var(--muted)" }}>
+                  ⚠️ {totalDuplicadas} de {totalFicheiro} já {totalDuplicadas === 1 ? "foi importado" : "foram importados"} anteriormente
+                  {totalNovas > 0 ? ` — apenas ${totalNovas} ${totalNovas === 1 ? "é novo" : "são novos"}.` : " — nada de novo para importar."}
+                </div>
+              );
+            })()}
+            {preview.contas?.length > 0 && (
+              <div style={{ marginTop: 8, fontSize: "0.78rem", color: "var(--muted)" }}>
+                🏷️ Conta detetada: <strong style={{ color: "var(--text)" }}>{preview.contas.join(", ")}</strong>
+                {preview.contaNomes?.length > 0 && (
+                  <> — <strong style={{ color: "var(--text)" }}>{preview.contaNomes.join(", ")}</strong></>
+                )}
+              </div>
+            )}
           </div>
 
           {preview.preview?.length > 0 && (
@@ -341,17 +372,48 @@ export default function Import() {
             </div>
           )}
 
-          <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={reset} style={{
-              flex: 1, padding: "10px", borderRadius: 8,
-              border: "1px solid var(--border)", background: "transparent",
-              cursor: "pointer", fontSize: "0.85rem", color: "var(--muted)", fontWeight: 600,
-            }}>Cancelar</button>
-            <button className="btn btn-primary" onClick={doConfirm} disabled={loading}
-              style={{ flex: 2, padding: "10px", fontSize: "0.9rem" }}>
-              {loading ? "A importar..." : `Confirmar e importar ${preview.nTrades} operações`}
-            </button>
-          </div>
+          {(() => {
+            const totalNovas = (preview.nTradesNovas ?? preview.nTrades) + (preview.nDividendsNovas ?? preview.nDividends) + (preview.nDepositsNovas ?? preview.nDeposits);
+            return (
+              <div style={{ display: "flex", gap: 10 }}>
+                {totalNovas === 0 ? (
+                  <button onClick={reset}
+                    style={{
+                      width: "100%", padding: "10px", borderRadius: 8,
+                      background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.35)",
+                      color: "#60a5fa", fontSize: "0.85rem", fontWeight: 700, cursor: "pointer",
+                      transition: "background .15s",
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = "rgba(96,165,250,0.22)"}
+                    onMouseLeave={e => e.currentTarget.style.background = "rgba(96,165,250,0.12)"}
+                  >Fechar</button>
+                ) : (
+                  <button onClick={reset} style={{
+                    flex: 1, padding: "10px", borderRadius: 8,
+                    border: "1px solid rgba(244,63,94,0.35)", background: "rgba(244,63,94,0.12)",
+                    cursor: "pointer", fontSize: "0.85rem", color: "#fb7185", fontWeight: 600,
+                    transition: "background .15s, transform .15s",
+                  }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "rgba(244,63,94,0.22)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "rgba(244,63,94,0.12)"; e.currentTarget.style.transform = "translateY(0)"; }}
+                  >Cancelar</button>
+                )}
+                {totalNovas > 0 && (
+                  <button onClick={doConfirm} disabled={loading} style={{
+                    flex: 2, padding: "10px", borderRadius: 8,
+                    border: "1px solid rgba(16,185,129,0.35)", background: "rgba(16,185,129,0.12)",
+                    cursor: loading ? "default" : "pointer", fontSize: "0.9rem", color: "#34d399", fontWeight: 700,
+                    opacity: loading ? 0.6 : 1, transition: "background .15s, transform .15s",
+                  }}
+                    onMouseEnter={e => { if (!loading) { e.currentTarget.style.background = "rgba(16,185,129,0.22)"; e.currentTarget.style.transform = "translateY(-1px)"; } }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "rgba(16,185,129,0.12)"; e.currentTarget.style.transform = "translateY(0)"; }}
+                  >
+                    {loading ? "A importar..." : `Confirmar e importar ${totalNovas} novas`}
+                  </button>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -396,7 +458,7 @@ export default function Import() {
               Total depositado:{" "}
               <strong style={{ color: "#22c55e" }}>
                 +€{deposits.filter(d => d.tipo === "deposito").reduce((s, d) => s + d.valor, 0)
-                  .toLocaleString("pt-PT", { minimumFractionDigits: 2 })}
+                  .toLocaleString("de-DE", { minimumFractionDigits: 2 })}
               </strong>
             </span>
           )}
@@ -410,7 +472,7 @@ export default function Import() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
               <thead>
                 <tr>
-                  {["Data", "Corretora", "Tipo", "Valor", "Descrição"].map(h => (
+                  {["Data", "Corretora", "Conta", "Tipo", "Valor", "Descrição"].map(h => (
                     <th key={h} style={{
                       padding: "8px 12px", textAlign: h === "Valor" ? "right" : "left",
                       background: "var(--hover)", color: "var(--muted)", fontWeight: 700,
@@ -435,6 +497,9 @@ export default function Import() {
                           color: BROKER_COLOR[d.corretora] ?? "var(--accent)",
                         }}>{d.corretora}</span>
                       </td>
+                      <td style={{ padding: "9px 12px", color: "var(--muted)", whiteSpace: "nowrap" }}>
+                        {d.conta || "—"}
+                      </td>
                       <td style={{ padding: "9px 12px" }}>
                         <span style={{
                           fontSize: "0.72rem", fontWeight: 600,
@@ -443,7 +508,7 @@ export default function Import() {
                       </td>
                       <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 700,
                         color: isDep ? "#22c55e" : "#f43f5e", whiteSpace: "nowrap" }}>
-                        {isDep ? "+" : "−"}€{d.valor.toLocaleString("pt-PT", { minimumFractionDigits: 2 })}
+                        {isDep ? "+" : "−"}€{d.valor.toLocaleString("de-DE", { minimumFractionDigits: 2 })}
                       </td>
                       <td style={{ padding: "9px 12px", color: "var(--muted)", fontSize: "0.75rem",
                         maxWidth: 340, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}

@@ -29,9 +29,14 @@ router.get("/", (req, res) => {
 router.get("/anos", (req, res) => {
   try {
     const db = getDb(req.session.user.username);
-    const rows = db.prepare(
-      "SELECT DISTINCT strftime('%Y', data_fecho) as ano FROM trades WHERE data_fecho IS NOT NULL ORDER BY ano DESC"
-    ).all();
+    // Inclui anos que só têm dividendos/juros (sem operações fechadas) — caso contrário
+    // esses anos nunca apareceriam no seletor e o Dashboard ficaria sem nenhum ano definido.
+    const rows = db.prepare(`
+      SELECT strftime('%Y', data_fecho) as ano FROM trades WHERE data_fecho IS NOT NULL
+      UNION
+      SELECT strftime('%Y', data_pagamento) as ano FROM dividendos WHERE data_pagamento IS NOT NULL
+      ORDER BY ano DESC
+    `).all();
     res.json(rows.map(r => parseInt(r.ano)));
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -70,7 +75,7 @@ router.get("/stats", (req, res) => {
     const worst_day_date = byDay[byDay.length - 1]?.dia ?? null;
 
     const win_rate      = total.n_trades > 0 ? (total.n_wins / total.n_trades) * 100 : 0;
-    const profit_factor = total.gross_loss !== 0 ? Math.abs(total.gross_win / total.gross_loss) : 0;
+    const profit_factor = total.gross_loss ? Math.abs(total.gross_win / total.gross_loss) : 0;
 
     res.json({ ...total, win_rate, profit_factor, best_day, best_day_date, worst_day, worst_day_date });
   } catch (e) {

@@ -4,7 +4,7 @@ const GREEN = "#10b981", RED = "#f43f5e";
 
 const fmtVal = v =>
   (v < 0 ? "-" : "") + "€ " +
-  Math.abs(v).toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  Math.abs(v).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function Modal({ title, onClose, summary, brokers, children }) {
   useEffect(() => {

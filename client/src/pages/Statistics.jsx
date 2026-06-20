@@ -7,8 +7,8 @@ import {
 } from "recharts";
 
 const GREEN="#10b981",RED="#f43f5e",BLUE="#4f6af5",MUTE="#4e6080";
-const fmt    = v => (v>=0?"+":"")+"€ "+Math.abs(v).toLocaleString("pt-PT",{minimumFractionDigits:2});
-const fmtPL  = v => (v<0?"-":"")+"€ "+Math.abs(v).toLocaleString("pt-PT",{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmt    = v => (v>=0?"+":"")+"€ "+Math.abs(v).toLocaleString("de-DE",{minimumFractionDigits:2});
+const fmtPL  = v => (v<0?"-":"")+"€ "+Math.abs(v).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});
 const brokerTotals = trades => Object.entries(
   trades.reduce((acc,t) => {
     const b = t.corretora||"—";

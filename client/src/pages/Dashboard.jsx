@@ -8,13 +8,13 @@ import Modal from "../components/Modal.jsx";
 
 const fmt = v =>
   (v < 0 ? "-" : "") + "€ " +
-  Math.abs(v).toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  Math.abs(v).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const fmtAbs = v =>
-  "€ " + Math.abs(v).toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  "€ " + Math.abs(v).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const GREEN = "#10b981", RED = "#f43f5e", BLUE = "#60a5fa",
-      PINK = "#f472b6", AMBER = "#fbbf24", PURPLE = "#a78bfa", MUTE = "#6b7280";
+      PINK = "#f472b6", AMBER = "#fbbf24", PURPLE = "#a78bfa", TEAL = "#14b8a6", MUTE = "#6b7280";
 
 const COUNTRY_NAME = {
   PT:"Portugal", US:"Estados Unidos", NL:"Países Baixos", DE:"Alemanha",
@@ -124,7 +124,7 @@ function MiniDonut({ pct, label, color, onClick, value }) {
   const [hovered, setHovered] = useState(false);
   const safe = isFinite(pct) ? Math.min(100, Math.max(0, pct || 0)) : 0;
   const fmtVal = v => {
-    const abs = Math.abs(v).toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const abs = Math.abs(v).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     return `${v < 0 ? "-" : ""}€${abs}`;
   };
   return (
@@ -224,6 +224,7 @@ const IcoGrid = c => <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
 const IcoPct  = c => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="9" r="3"/><circle cx="15" cy="15" r="3"/><line x1="6" y1="18" x2="18" y2="6"/></svg>;
 const IcoCoin = c => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 12h6M12 9v6"/></svg>;
 const IcoBar  = c => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg>;
+const IcoBank = c => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="21" x2="21" y2="21"/><line x1="3" y1="10" x2="21" y2="10"/><polyline points="5 6 12 3 19 6"/><line x1="4" y1="10" x2="4" y2="21"/><line x1="20" y1="10" x2="20" y2="21"/><line x1="9" y1="14" x2="9" y2="17"/><line x1="15" y1="14" x2="15" y2="17"/></svg>;
 
 export default function Dashboard({ user }) {
   const [anos, setAnos]           = useState([]);
@@ -251,7 +252,8 @@ export default function Dashboard({ user }) {
     axios.get("/api/trades/anos").then(r => {
       setAnos(r.data);
       if (r.data.length) setAno(r.data[0]);
-    }).finally(() => setAnosReady(true));
+      else setLoading(false); // sem nenhum ano (nem trades nem dividendos) — não há nada para carregar
+    }).catch(() => setLoading(false)).finally(() => setAnosReady(true));
     axios.get("/api/import/deposits").then(r => setDeposits(r.data)).catch(() => {});
   }, []);
 
@@ -318,11 +320,18 @@ export default function Dashboard({ user }) {
   };
   const openWins       = () => { const t = allTrades.filter(t => t.pl_eur > 0);  setModal({ title: "✅ Trades Ganhas",   trades: t, brokers: brokerTotals(t), summary: { label: `${t.length} trades`, value: tradeSum(t) } }); };
   const openLosses     = () => { const t = allTrades.filter(t => t.pl_eur < 0);  setModal({ title: "❌ Trades Perdidas", trades: t, brokers: brokerTotals(t), summary: { label: `${t.length} trades`, value: tradeSum(t) } }); };
+  const brokersFromDivs = list => Object.entries(
+    list.reduce((acc, d) => { const b = d.corretora || "—"; if (!acc[b]) acc[b] = { pl: 0, n: 0 }; acc[b].pl += d.valor_liq_eur ?? 0; acc[b].n++; return acc; }, {})
+  ).sort((a, b) => Math.abs(b[1].pl) - Math.abs(a[1].pl));
   const openDivs       = () => {
-    const divBrokers = Object.entries(
-      allDivs.reduce((acc, d) => { const b = d.corretora || "—"; if (!acc[b]) acc[b] = { pl: 0, n: 0 }; acc[b].pl += d.valor_liq_eur ?? 0; acc[b].n++; return acc; }, {})
-    ).sort((a, b) => Math.abs(b[1].pl) - Math.abs(a[1].pl));
-    setModal({ title: "💰 Dividendos", divs: allDivs, brokers: divBrokers, summary: { label: `${allDivs.length} pagamentos`, value: divTotal?.total_liq ?? 0 } });
+    const list = allDivs.filter(d => d.tipo !== "INTEREST");
+    const total = list.reduce((s, d) => s + (d.valor_liq_eur ?? 0), 0);
+    setModal({ title: "💰 Dividendos", divs: list, brokers: brokersFromDivs(list), summary: { label: `${list.length} pagamentos`, value: total } });
+  };
+  const openInterest   = () => {
+    const list = allDivs.filter(d => d.tipo === "INTEREST");
+    const total = list.reduce((s, d) => s + (d.valor_liq_eur ?? 0), 0);
+    setModal({ title: "🏦 Juros", divs: list, brokers: brokersFromDivs(list), summary: { label: `${list.length} pagamentos`, value: total } });
   };
   const openBestDay    = () => { const d = stats?.best_day_date;  const t = allTrades.filter(t => t.data_fecho?.slice(0, 10) === d); setModal({ title: `📈 Melhor Dia — ${d ?? ""}`, trades: t, brokers: brokerTotals(t), summary: { label: `${t.length} trades`, value: stats?.best_day ?? 0 } }); };
   const openWorstDay   = () => { const d = stats?.worst_day_date; const t = allTrades.filter(t => t.data_fecho?.slice(0, 10) === d); setModal({ title: `📉 Pior Dia — ${d ?? ""}`,   trades: t, brokers: brokerTotals(t), summary: { label: `${t.length} trades`, value: stats?.worst_day ?? 0 } }); };
@@ -418,6 +427,8 @@ export default function Dashboard({ user }) {
   const wr          = stats.win_rate ?? 0;
   const pf          = stats.profit_factor ?? 0;
   const divLiq      = divTotal?.total_liq ?? 0;
+  const interestLiq  = allDivs.filter(d => d.tipo === "INTEREST").reduce((s, d) => s + (d.valor_liq_eur ?? 0), 0);
+  const dividendsLiq = allDivs.filter(d => d.tipo !== "INTEREST").reduce((s, d) => s + (d.valor_liq_eur ?? 0), 0);
   const totalIncome = (stats.net_pl ?? 0) + divLiq;
   const expectancy  = stats.n_trades > 0 ? (stats.net_pl ?? 0) / stats.n_trades : 0;
   const top10sym    = [...bySymbol].filter(s => Math.abs(s.pl_total) > 0.001).sort((a, b) => a.pl_total - b.pl_total);
@@ -433,9 +444,18 @@ export default function Dashboard({ user }) {
   const cfdSt    = catStats("CFD");
   const optionSt = catStats("OPTION");
 
-  // % of total absolute P&L each category contributes
-  const allCatAbs = Math.abs(stockSt.pl) + Math.abs(cfdSt.pl) + Math.abs(optionSt.pl) + Math.abs(divLiq);
+  // % of total absolute P&L each category contributes (dividendos e juros separados)
+  const allCatAbs = Math.abs(stockSt.pl) + Math.abs(cfdSt.pl) + Math.abs(optionSt.pl) + Math.abs(dividendsLiq) + Math.abs(interestLiq);
   const catPct    = val => allCatAbs > 0 ? Math.abs(val) / allCatAbs * 100 : 0;
+  const nDividendos = allDivs.filter(d => d.tipo !== "INTEREST").length;
+  const nJuros      = allDivs.filter(d => d.tipo === "INTEREST").length;
+  const catDonuts = [
+    { pct: catPct(stockSt.pl),    label: "Ações",      color: BLUE,  onClick: () => openCategory("STOCK", "Ações", "📈"),  value: stockSt.pl,    show: stockSt.n > 0 },
+    { pct: catPct(optionSt.pl),   label: "Opções",     color: PINK,  onClick: () => openCategory("OPTION", "Opções", "🎯"), value: optionSt.pl,   show: optionSt.n > 0 },
+    { pct: catPct(cfdSt.pl),      label: "CFDs",       color: AMBER, onClick: () => openCategory("CFD", "CFDs", "⚡"),      value: cfdSt.pl,      show: cfdSt.n > 0 },
+    { pct: catPct(dividendsLiq),  label: "Dividendos", color: GREEN, onClick: openDivs,                                     value: dividendsLiq,  show: dividendsLiq !== 0 },
+    { pct: catPct(interestLiq),   label: "Juros",      color: TEAL,  onClick: openInterest,                                 value: interestLiq,   show: interestLiq !== 0 },
+  ].filter(c => c.show);
 
   const brokerStats = Object.entries(
     allTrades.reduce((acc, t) => {
@@ -522,7 +542,8 @@ export default function Dashboard({ user }) {
         <StatIconCard icon={IcoLine(PINK)}  colorBg="rgba(244,114,182,0.15)" color={PINK}   value={fmt(stats.net_pl ?? 0)}   label="Resultado Líquido" onClick={openAllTrades} />
         <StatIconCard icon={IcoGrid(BLUE)}  colorBg="rgba(96,165,250,0.15)"  color={BLUE}   value={stats.n_trades}           label="Total de Trades"   onClick={openAllTrades} />
         <StatIconCard icon={IcoPct(AMBER)}  colorBg="rgba(251,191,36,0.15)"  color={AMBER}  value={`${wr.toFixed(1)}%`}      label="Win Rate"          onClick={openWins} />
-        <StatIconCard icon={IcoCoin(GREEN)} colorBg="rgba(16,185,129,0.15)"  color={GREEN}  value={fmt(divLiq)}              label="Dividendos"        onClick={openDivs} />
+        <StatIconCard icon={IcoCoin(GREEN)} colorBg="rgba(16,185,129,0.15)"  color={GREEN}  value={fmt(dividendsLiq)}        label="Dividendos"        onClick={openDivs} />
+        <StatIconCard icon={IcoBank(TEAL)}  colorBg="rgba(20,184,166,0.15)"  color={TEAL}   value={fmt(interestLiq)}         label="Juros"             onClick={openInterest} />
         <StatIconCard icon={IcoBar(PURPLE)} colorBg="rgba(167,139,250,0.15)" color={PURPLE} value={pf.toFixed(2)}            label="Profit Factor"     onClick={openAllTrades} />
       </div>
 
@@ -990,15 +1011,14 @@ export default function Dashboard({ user }) {
           <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "var(--text)", marginBottom: 2 }}>Categorias</div>
           <div style={{ fontSize: "0.72rem", color: MUTE, marginBottom: 22 }}>% do P&L total por categoria</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, justifyItems: "center" }}>
-            <MiniDonut pct={catPct(stockSt.pl)}  label="Ações"      color={BLUE}  onClick={() => openCategory("STOCK",  "Ações",  "📈")} value={stockSt.pl} />
-            <MiniDonut pct={catPct(optionSt.pl)} label="Opções"     color={PINK}  onClick={() => openCategory("OPTION", "Opções", "🎯")} value={optionSt.pl} />
-            <MiniDonut pct={catPct(cfdSt.pl)}    label="CFDs"       color={AMBER} onClick={() => openCategory("CFD",    "CFDs",   "⚡")} value={cfdSt.pl} />
-            <MiniDonut pct={catPct(divLiq)}       label="Dividendos" color={GREEN} onClick={openDivs} value={divLiq} />
+            {catDonuts.map(c => (
+              <MiniDonut key={c.label} pct={c.pct} label={c.label} color={c.color} onClick={c.onClick} value={c.value} />
+            ))}
           </div>
           <div style={{ marginTop: 20, paddingTop: 12, borderTop: "1px dashed rgba(255,255,255,0.13)", display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: "0.78rem", color: "var(--text)", fontWeight: 700, marginBottom: 4 }}>
-                {stats.n_trades} operações · {allDivs.length} dividendos
+                {stats.n_trades} operações · {nDividendos} dividendos{nJuros > 0 ? ` · ${nJuros} juros` : ""}
               </div>
               <div style={{ fontSize: "0.62rem", color: MUTE, lineHeight: 1.55 }}>
                 % representa o peso de cada categoria no total absoluto de P&L (soma de ganhos e perdas sem sinal).

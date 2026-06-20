@@ -421,6 +421,22 @@ select option { background: var(--sidebar); }
 .trade-pl.loss { color: var(--red); }
 .trade-date { color: var(--mute); font-size: 0.75rem; }
 
+/* ── LOG (registo com colunas) ─────────────────────────────── */
+.log-head {
+  display: grid; gap: 10px; padding: 6px 16px 8px; align-items: center;
+  font-size: 0.6rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--mute);
+}
+.log-row {
+  display: grid; gap: 10px; align-items: center;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 11px 16px;
+  margin-bottom: 5px; font-size: 0.82rem; cursor: pointer;
+  transition: background var(--ease), border-color var(--ease);
+}
+.log-row:hover { background: var(--hover); border-color: var(--accent); }
+.log-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
 /* ── MODAL ────────────────────────────────────────────────── */
 .modal-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,.72);
