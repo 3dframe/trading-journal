@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import {
-  BarChart, Bar, PieChart, Pie, Cell,
+  BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid,
 } from "recharts";
 import Modal from "../components/Modal.jsx";
@@ -26,23 +26,6 @@ const COUNTRY_NAME = {
 };
 const fmtPais = code => (code && COUNTRY_NAME[code]) ? COUNTRY_NAME[code] : (code ?? null);
 
-const weekRange = semana => {
-  if (!semana) return "";
-  const [yearStr, wStr] = semana.split("-W");
-  const year = parseInt(yearStr, 10);
-  const week = parseInt(wStr, 10);
-  const jan1 = new Date(year, 0, 1);
-  const jan1Day = jan1.getDay(); // 0=Dom,1=Seg,...
-  const daysToFirstMonday = jan1Day === 1 ? 0 : jan1Day === 0 ? 1 : 8 - jan1Day;
-  const start = week === 0
-    ? new Date(year, 0, 1)
-    : new Date(year, 0, 1 + daysToFirstMonday + (week - 1) * 7);
-  const end = new Date(start);
-  end.setDate(start.getDate() + 6);
-  const f = d => d.toLocaleDateString("pt-PT", { day: "numeric", month: "short" });
-  return `${f(start)} – ${f(end)}`;
-};
-
 const TooltipDark = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   return (
@@ -53,18 +36,6 @@ const TooltipDark = ({ active, payload, label }) => {
           {fmt(p.value)}
         </div>
       ))}
-    </div>
-  );
-};
-
-const WeekTooltip = ({ active, payload, label }) => {
-  if (!active || !payload?.length) return null;
-  const pl = payload[0]?.value ?? 0;
-  return (
-    <div style={{ background: "#252530", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "8px 12px", fontSize: 12 }}>
-      <div style={{ color: MUTE, marginBottom: 3, fontSize: 11 }}>{label}</div>
-      <div style={{ color: MUTE, marginBottom: 5, fontSize: 10 }}>{weekRange(label)}</div>
-      <div style={{ color: pl >= 0 ? GREEN : RED, fontWeight: 700 }}>{fmt(pl)}</div>
     </div>
   );
 };
@@ -231,22 +202,16 @@ export default function Dashboard({ user }) {
   const [ano, setAno]             = useState(null);
   const [stats, setStats]         = useState(null);
   const [equity, setEquity]       = useState([]);
-  const [weekly, setWeekly]       = useState([]);
   const [bySymbol, setBySymbol]   = useState([]);
   const [allTrades, setAllTrades] = useState([]);
   const [allDivs, setAllDivs]     = useState([]);
   const [divTotal, setDivTotal]   = useState(null);
   const [deposits, setDeposits]   = useState([]);
+  const [equityAll, setEquityAll] = useState([]);   // equity acumulada desde sempre
+  const [eqScope, setEqScope]     = useState("ano"); // "ano" | "all"
   const [modal, setModal]               = useState(null);
   const [loading, setLoading]           = useState(true);
   const [anosReady, setAnosReady]       = useState(false);
-  const [showIncome,  setShowIncome]  = useState(true);
-  const [showExpense, setShowExpense] = useState(true);
-  const [equityMonth, setEquityMonth] = useState(() => {
-    const d = new Date();
-    d.setMonth(d.getMonth() - 1);
-    return d.toISOString().slice(0, 7);
-  });
 
   useEffect(() => {
     axios.get("/api/trades/anos").then(r => {
@@ -255,16 +220,16 @@ export default function Dashboard({ user }) {
       else setLoading(false); // sem nenhum ano (nem trades nem dividendos) — não há nada para carregar
     }).catch(() => setLoading(false)).finally(() => setAnosReady(true));
     axios.get("/api/import/deposits").then(r => setDeposits(r.data)).catch(() => {});
+    axios.get("/api/trades/equity").then(r => setEquityAll(r.data)).catch(() => {}); // sem ?ano = desde início
   }, []);
 
   const load = useCallback(async (a) => {
     if (!a) return;
     setLoading(true);
     try {
-      const [s, eq, wk, sym, rec, divs, divsAll] = await Promise.all([
+      const [s, eq, sym, rec, divs, divsAll] = await Promise.all([
         axios.get(`/api/trades/stats?ano=${a}`),
         axios.get(`/api/trades/equity?ano=${a}`),
-        axios.get(`/api/trades/by-week?ano=${a}`),
         axios.get(`/api/trades/by-symbol?ano=${a}`),
         axios.get(`/api/trades?ano=${a}`),
         axios.get(`/api/dividends/total?ano=${a}`),
@@ -272,7 +237,6 @@ export default function Dashboard({ user }) {
       ]);
       setStats(s.data);
       setEquity(eq.data);
-      setWeekly(wk.data);
       setBySymbol(sym.data.slice(0, 10));
       setAllTrades(rec.data);
       setDivTotal(divs.data);
@@ -356,36 +320,6 @@ export default function Dashboard({ user }) {
     setModal({ title: `📌 ${simbolo} — Histórico`, trades, detailed: true, divs: symDivs.length > 0 ? symDivs : null, brokers: brokerTotals(trades), summary: { label: subLabel, value: plT + plD } });
   };
 
-  const maxDrawdown = useMemo(() => {
-    if (!equity.length) return 0;
-    let peak = equity[0].equity, maxDD = 0;
-    for (const p of equity) {
-      if (p.equity > peak) peak = p.equity;
-      const dd = peak - p.equity;
-      if (dd > maxDD) maxDD = dd;
-    }
-    return maxDD;
-  }, [equity]);
-
-  const monthlyEquity = useMemo(() => {
-    const map = {};
-    allTrades.forEach(t => {
-      if (!t.data_fecho) return;
-      const key = t.data_fecho.slice(0, 7);
-      if (!map[key]) map[key] = { income: 0, expense: 0 };
-      const pl = t.pl_eur ?? 0;
-      if (pl > 0) map[key].income  += pl;
-      else if (pl < 0) map[key].expense += Math.abs(pl);
-    });
-    return Object.entries(map)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([month, v]) => ({
-        month,
-        label: new Date(month + "-01").toLocaleDateString("pt-PT", { month: "short" }),
-        ...v,
-      }));
-  }, [allTrades]);
-
   if (!anosReady || loading) return <DashboardSkeleton />;
 
   if (anos.length === 0) {
@@ -457,6 +391,20 @@ export default function Dashboard({ user }) {
     { pct: catPct(interestLiq),   label: "Juros",      color: TEAL,  onClick: openInterest,                                 value: interestLiq,   show: interestLiq !== 0 },
   ].filter(c => c.show);
 
+  // Série da curva de equity: ano selecionado ou desde o início
+  const eqData = eqScope === "all" ? equityAll : equity;
+  // Posição do zero na curva (para colorir verde acima / vermelho abaixo)
+  const eqVals = eqData.map(d => d.equity);
+  const eqMax  = eqVals.length ? Math.max(...eqVals, 0) : 0;
+  const eqMin  = eqVals.length ? Math.min(...eqVals, 0) : 0;
+  const eqOff  = eqMax <= 0 ? 0 : eqMin >= 0 ? 1 : eqMax / (eqMax - eqMin);
+  // Max Drawdown da série apresentada (pico → vale)
+  const maxDrawdown = (() => {
+    let peak = eqData[0]?.equity ?? 0, dd = 0;
+    for (const p of eqData) { if (p.equity > peak) peak = p.equity; if (peak - p.equity > dd) dd = peak - p.equity; }
+    return dd;
+  })();
+
   const brokerStats = Object.entries(
     allTrades.reduce((acc, t) => {
       const b = t.corretora || "—";
@@ -467,33 +415,10 @@ export default function Dashboard({ user }) {
     }, {})
   ).sort((a, b) => Math.abs(b[1].ganhos + b[1].perdas) - Math.abs(a[1].ganhos + a[1].perdas));
 
-  const catDonutData = [
-    stockSt.n > 0  && { name: "Ações",      value: Math.abs(stockSt.pl),  pl: stockSt.pl,  color: "#93c5fd" },
-    cfdSt.n > 0    && { name: "CFDs",        value: Math.abs(cfdSt.pl),    pl: cfdSt.pl,    color: "#fde68a" },
-    optionSt.n > 0 && { name: "Opções",      value: Math.abs(optionSt.pl), pl: optionSt.pl, color: "#f9a8d4" },
-    divLiq !== 0   && { name: "Dividendos",  value: Math.abs(divLiq),      pl: divLiq,      color: "#6ee7b7" },
-  ].filter(Boolean);
-
-  const totalWinsVal   = (stats.avg_win  || 0) * (stats.n_wins   || 0);
-  const totalLossesVal = Math.abs(stats.avg_loss || 0) * (stats.n_losses || 0);
-
-  // Equity chart (monthly grouped)
-  const eqChartData   = (equityMonth === "all" || equityMonth === "") ? monthlyEquity : monthlyEquity.filter(m => m.month === equityMonth);
-  const eqIncomeTotal  = eqChartData.reduce((s, m) => s + m.income,  0);
-  const eqExpenseTotal = eqChartData.reduce((s, m) => s + m.expense, 0);
-  const eqTotalAct     = eqIncomeTotal + eqExpenseTotal;
-  const eqIncomePct    = eqTotalAct > 0 ? eqIncomeTotal  / eqTotalAct * 100 : 0;
-  const eqExpensePct   = eqTotalAct > 0 ? eqExpenseTotal / eqTotalAct * 100 : 0;
-  const eqBarW         = equityMonth === "all" ? Math.max(4, Math.floor(140 / Math.max(monthlyEquity.length, 1))) : 18;
-
-  // Inline hover helpers
   // Depósitos agrupados por corretora (só entradas)
   const depositsByBroker = deposits
     .filter(d => d.tipo === "deposito")
     .reduce((acc, d) => { acc[d.corretora] = (acc[d.corretora] || 0) + d.valor; return acc; }, {});
-
-  const hoverGreen = { onMouseEnter: e => { e.currentTarget.style.background = "rgba(16,185,129,0.14)"; }, onMouseLeave: e => { e.currentTarget.style.background = "rgba(16,185,129,0.07)"; } };
-  const hoverRed   = { onMouseEnter: e => { e.currentTarget.style.background = "rgba(244,63,94,0.14)";  }, onMouseLeave: e => { e.currentTarget.style.background = "rgba(244,63,94,0.07)"; } };
 
   return (
     <>
@@ -547,11 +472,8 @@ export default function Dashboard({ user }) {
         <StatIconCard icon={IcoBar(PURPLE)} colorBg="rgba(167,139,250,0.15)" color={PURPLE} value={pf.toFixed(2)}            label="Profit Factor"     onClick={openAllTrades} />
       </div>
 
-      {/* ── Middle row: Summary + Donuts ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "3fr 2fr", gap: 16, marginBottom: 20 }}>
-
-        {/* Left: Total Acumulado — two-column layout */}
-        <div className="card" style={{ padding: 24, display: "flex", gap: 24 }}>
+      {/* ── Curva de Equity (largura total) ── */}
+      <div className="card" style={{ padding: 24, display: "flex", gap: 24, marginBottom: 20 }}>
 
           {/* Info column */}
           <div style={{ width: 210, flexShrink: 0, display: "flex", flexDirection: "column" }}>
@@ -562,13 +484,19 @@ export default function Dashboard({ user }) {
             </div>
 
             {/* P&L total + PF */}
-            <div style={{ marginBottom: 18, display: "flex", alignItems: "flex-end", gap: 10 }}>
+            <div style={{ marginBottom: 12, display: "flex", alignItems: "flex-end", gap: 10 }}>
               <div style={{ fontSize: "1.55rem", fontWeight: 800, letterSpacing: "-0.5px", color: totalIncome >= 0 ? GREEN : RED }}>
                 {fmtAbs(totalIncome)}
               </div>
               <span style={{ color: totalIncome >= 0 ? GREEN : RED, fontSize: "0.72rem", fontWeight: 700, opacity: 0.75 }}>
                 {pf.toFixed(2)}x PF
               </span>
+            </div>
+
+            {/* Max Drawdown */}
+            <div style={{ marginBottom: 18, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <span style={{ fontSize: "0.72rem", color: MUTE }}>Max Drawdown</span>
+              <span style={{ fontSize: "0.9rem", fontWeight: 700, color: RED }}>−{fmtAbs(maxDrawdown)}</span>
             </div>
 
             {/* Depósitos por corretora */}
@@ -598,36 +526,66 @@ export default function Dashboard({ user }) {
 
           {/* Chart column */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-            <div style={{ fontSize: "0.6rem", fontWeight: 700, color: MUTE, textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 10 }}>P&L por Semana</div>
-            <div style={{ flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <div style={{ fontSize: "0.6rem", fontWeight: 700, color: MUTE, textTransform: "uppercase", letterSpacing: ".1em" }}>Curva de Equity</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {[["ano", `Ano ${ano}`], ["all", "Desde início"]].map(([k, label]) => {
+                  const active = eqScope === k;
+                  const base  = active ? "rgba(96,165,250,0.18)" : "rgba(255,255,255,0.04)";
+                  const hover = active ? "rgba(96,165,250,0.28)" : "rgba(255,255,255,0.08)";
+                  return (
+                    <button key={k} onClick={() => setEqScope(k)} style={{
+                      padding: "4px 10px", borderRadius: 7, fontSize: "0.68rem", fontWeight: active ? 700 : 600,
+                      cursor: "pointer", whiteSpace: "nowrap", fontFamily: "var(--font)",
+                      border: `1px solid ${active ? "rgba(96,165,250,0.45)" : "var(--border)"}`,
+                      background: base, color: active ? "#60a5fa" : MUTE,
+                      transition: "background .15s, transform .15s",
+                    }}
+                      onMouseEnter={e => { e.currentTarget.style.background = hover; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = base;  e.currentTarget.style.transform = "translateY(0)"; }}
+                    >{label}</button>
+                  );
+                })}
+              </div>
+            </div>
+            <div style={{ flex: 1, minHeight: 220 }}>
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={weekly} barSize={10}>
+                <AreaChart data={eqData}>
                   <defs>
-                    <linearGradient id="weekGreen" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#10b981" stopOpacity={0.9} />
-                      <stop offset="100%" stopColor="#10b981" stopOpacity={0.15} />
+                    {/* Linha: verde acima do zero, vermelho abaixo */}
+                    <linearGradient id="eqStroke" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset={eqOff} stopColor="#10b981" stopOpacity={1} />
+                      <stop offset={eqOff} stopColor="#f43f5e" stopOpacity={1} />
                     </linearGradient>
-                    <linearGradient id="weekRed" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#f43f5e" stopOpacity={0.15} />
-                      <stop offset="100%" stopColor="#f43f5e" stopOpacity={0.9} />
+                    {/* Preenchimento: verde esbatido acima, vermelho esbatido abaixo */}
+                    <linearGradient id="eqArea" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset={0}     stopColor="#10b981" stopOpacity={0.35} />
+                      <stop offset={eqOff} stopColor="#10b981" stopOpacity={0.04} />
+                      <stop offset={eqOff} stopColor="#f43f5e" stopOpacity={0.04} />
+                      <stop offset={1}     stopColor="#f43f5e" stopOpacity={0.35} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
-                  <XAxis dataKey="semana" tick={{ fill: MUTE, fontSize: 9 }} tickFormatter={s => s?.slice(5)} interval="preserveStartEnd" axisLine={false} tickLine={false} />
+                  <XAxis dataKey="dia" tick={{ fill: MUTE, fontSize: 9 }} tickFormatter={d => d?.slice(5)} interval="preserveStartEnd" minTickGap={28} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: MUTE, fontSize: 9 }} tickFormatter={v => `€${v}`} width={46} axisLine={false} tickLine={false} />
-                  <Tooltip content={<WeekTooltip />} cursor={{ fill: "transparent" }} />
-                  <ReferenceLine y={0} stroke="rgba(255,255,255,0.18)" />
-                  <Bar dataKey="pl" radius={[3,3,0,0]}>
-                    {weekly.map((w, i) => <Cell key={i} fill={w.pl >= 0 ? "url(#weekGreen)" : "url(#weekRed)"} />)}
-                  </Bar>
-                </BarChart>
+                  <Tooltip
+                    formatter={v => [fmt(v), "Equity acumulada"]}
+                    contentStyle={{ background: "#252530", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12 }}
+                    labelStyle={{ color: MUTE }}
+                  />
+                  <ReferenceLine y={0} stroke="rgba(255,255,255,0.25)" strokeDasharray="3 3" />
+                  <Area type="monotone" dataKey="equity" stroke="url(#eqStroke)" strokeWidth={2} fill="url(#eqArea)" dot={false} activeDot={{ r: 3 }} />
+                </AreaChart>
               </ResponsiveContainer>
+            </div>
+            <div style={{ fontSize: "0.62rem", color: MUTE, marginTop: 8, lineHeight: 1.5 }}>
+              Evolução acumulada do resultado das operações {eqScope === "all" ? "desde o início" : `ao longo de ${ano}`} (não inclui dividendos/juros).
             </div>
           </div>
         </div>
 
-        {/* Right: Win/Loss */}
-        <div className="card" style={{ padding: 20, display: "flex", flexDirection: "column" }}>
+        {/* Win/Loss (movido para junto das Métricas Detalhadas) */}
+        <div className="card" style={{ padding: 20, display: "flex", flexDirection: "column", marginBottom: 24 }}>
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "var(--text)" }}>Win / Loss</div>
             <div style={{ fontSize: "0.72rem", color: MUTE, marginTop: 2 }}>Ano {ano}</div>
@@ -744,197 +702,7 @@ export default function Dashboard({ user }) {
             <strong style={{ color: "var(--text)" }}>Win Rate</strong> é a percentagem de trades encerradas com lucro. Os valores de ganhos e perdas referem-se exclusivamente a operações de trading — <strong style={{ color: "var(--text)" }}>os dividendos não estão incluídos</strong>. Clica em Melhor/Pior Dia para ver os detalhes das operações desse dia.
           </div>
         </div>
-      </div>
 
-      {/* ── Bottom row: Equity (with income/expense panel) + P&L donut ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "3fr 1fr", gap: 16, marginBottom: 24 }}>
-
-          {/* Curva de Equity + Income/Expense panel */}
-          <div className="card" style={{ padding: 20, display: "flex", gap: 20 }}>
-
-            {/* Chart */}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "var(--text)", marginBottom: 2 }}>Curva de Equity</div>
-                <div style={{ fontSize: "0.72rem", color: MUTE }}>Ano {ano}</div>
-              </div>
-              <ResponsiveContainer width="100%" height={230}>
-                <BarChart data={eqChartData} barSize={eqBarW} barGap={2} barCategoryGap="40%">
-                  <defs>
-                    <linearGradient id="eqAmber" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#fbbf24" stopOpacity={0.9} />
-                      <stop offset="100%" stopColor="#fbbf24" stopOpacity={0.15} />
-                    </linearGradient>
-                    <linearGradient id="eqWhite" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#ffffff" stopOpacity={0.55} />
-                      <stop offset="100%" stopColor="#ffffff" stopOpacity={0.08} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fill: MUTE, fontSize: 9 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: MUTE, fontSize: 9 }} tickFormatter={v => `€${v.toFixed(0)}`} width={56} axisLine={false} tickLine={false} />
-                  <Tooltip
-                    formatter={(v, name) => [fmt(v), name === "income" ? "Ganhos" : "Perdas"]}
-                    contentStyle={{ background: "#252530", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12 }}
-                    labelStyle={{ color: MUTE }}
-                    cursor={{ fill: "transparent" }}
-                  />
-                  <ReferenceLine y={0} stroke="rgba(255,255,255,0.22)" />
-                  {showIncome  && <Bar dataKey="income"  name="income"  fill="url(#eqAmber)" radius={[3,3,0,0]} />}
-                  {showExpense && <Bar dataKey="expense" name="expense" fill="url(#eqWhite)" radius={[3,3,0,0]} />}
-                </BarChart>
-              </ResponsiveContainer>
-              <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed rgba(255,255,255,0.08)", fontSize: "0.72rem", color: MUTE, lineHeight: 1.7 }}>
-                Barras <span style={{ color: AMBER, fontWeight: 600 }}>amarelas</span> representam ganhos e barras <span style={{ color: "rgba(255,255,255,0.7)", fontWeight: 600 }}>brancas</span> representam perdas. Clica nos indicadores para filtrar.
-              </div>
-            </div>
-
-            {/* Income / Expense panel */}
-            <div style={{ width: 185, flexShrink: 0, display: "flex", flexDirection: "column" }}>
-              <select value={equityMonth} onChange={e => setEquityMonth(e.target.value)}
-                style={{ marginBottom: 16, fontSize: "0.75rem", padding: "6px 10px" }}>
-                <option value="">— Período —</option>
-                <option value="all">Este Ano</option>
-                {monthlyEquity.map(m => (
-                  <option key={m.month} value={m.month}>
-                    {m.label} {m.month.slice(0, 4)}
-                  </option>
-                ))}
-              </select>
-
-              {/* Indicators — só visíveis quando período seleccionado */}
-              {equityMonth === "" ? (
-                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <div style={{ textAlign: "center", color: MUTE, fontSize: "0.7rem", lineHeight: 1.6 }}>
-                    Seleciona um período<br/>para ver os totais
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div style={{ display: "flex", gap: 14, marginBottom: 16 }}>
-                    {/* Income circle — AMBER — toggle independente */}
-                    <div onClick={() => setShowIncome(v => !v)}
-                      style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
-                        opacity: showIncome ? 1 : 0.4, transition: "opacity .2s" }}>
-                      <div style={{ width: 22, height: 22, borderRadius: "50%",
-                        border: `2px solid ${AMBER}`,
-                        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                        background: "transparent" }}>
-                        {showIncome && <div style={{ width: 9, height: 9, borderRadius: "50%", background: AMBER }}/>}
-                      </div>
-                      <div>
-                        <div style={{ fontSize: "0.6rem", color: MUTE, lineHeight: 1 }}>Ganhos</div>
-                        <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--text)", marginTop: 2 }}>
-                          {eqIncomeTotal >= 1000 ? `${(eqIncomeTotal/1000).toFixed(1)}k` : eqIncomeTotal.toFixed(0)}
-                        </div>
-                      </div>
-                    </div>
-                    {/* Expense circle — branco — toggle independente */}
-                    <div onClick={() => setShowExpense(v => !v)}
-                      style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
-                        opacity: showExpense ? 1 : 0.4, transition: "opacity .2s" }}>
-                      <div style={{ width: 22, height: 22, borderRadius: "50%",
-                        border: "2px solid rgba(255,255,255,0.75)",
-                        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                        background: "transparent" }}>
-                        {showExpense && <div style={{ width: 9, height: 9, borderRadius: "50%", background: "rgba(255,255,255,0.85)" }}/>}
-                      </div>
-                      <div>
-                        <div style={{ fontSize: "0.6rem", color: MUTE, lineHeight: 1 }}>Perdas</div>
-                        <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--text)", marginTop: 2 }}>
-                          {eqExpenseTotal >= 1000 ? `${(eqExpenseTotal/1000).toFixed(1)}k` : eqExpenseTotal.toFixed(0)}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-              {/* Income card */}
-              <div onClick={openWins} style={{ background: "rgba(255,255,255,0.04)", borderRadius: 10, padding: "13px 14px", marginBottom: 10, cursor: "pointer", border: "1px solid var(--border)", transition: "background .2s" }}
-                onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.08)"}
-                onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.04)"}>
-                <div style={{ fontSize: "0.62rem", color: MUTE, marginBottom: 6 }}>Ganhos</div>
-                <div style={{ fontSize: "1rem", fontWeight: 800, color: "var(--text)" }}>{fmtAbs(eqIncomeTotal)}</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 7 }}>
-                  <span style={{ width: 16, height: 16, borderRadius: "50%", background: AMBER, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="3.5" strokeLinecap="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
-                  </span>
-                  <span style={{ fontSize: "0.72rem", color: AMBER, fontWeight: 700 }}>{eqIncomePct.toFixed(0)}%</span>
-                  <span style={{ fontSize: "0.63rem", color: MUTE }}>do total</span>
-                </div>
-              </div>
-
-              {/* Expense card */}
-              <div onClick={openLosses} style={{ background: "rgba(255,255,255,0.04)", borderRadius: 10, padding: "13px 14px", cursor: "pointer", border: "1px solid var(--border)", transition: "background .2s" }}
-                onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.08)"}
-                onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.04)"}>
-                <div style={{ fontSize: "0.62rem", color: MUTE, marginBottom: 6 }}>Perdas</div>
-                <div style={{ fontSize: "1rem", fontWeight: 800, color: "var(--text)" }}>{fmtAbs(eqExpenseTotal)}</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 7 }}>
-                  <span style={{ width: 16, height: 16, borderRadius: "50%", background: "rgba(255,255,255,0.18)", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
-                  </span>
-                  <span style={{ fontSize: "0.72rem", color: "rgba(255,255,255,0.55)", fontWeight: 700 }}>{eqExpensePct.toFixed(0)}%</span>
-                  <span style={{ fontSize: "0.63rem", color: MUTE }}>do total</span>
-                </div>
-              </div>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* P&L by category donut */}
-          <div className="card" style={{ padding: 20 }}>
-          <div style={{ marginBottom: 10 }}>
-            <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "var(--text)", marginBottom: 2 }}>Lucro / Perda</div>
-            <div style={{ fontSize: "0.72rem", color: MUTE, marginTop: 2 }}>Ano {ano}</div>
-          </div>
-          {catDonutData.length > 0 ? (() => {
-            const totalAbs = catDonutData.reduce((s, d) => s + d.value, 0);
-            const totalVal = (stats.net_pl ?? 0) + divLiq;
-            return (
-            <>
-              <div style={{ position: "relative", width: "100%", height: 140 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={catDonutData} dataKey="value" innerRadius={42} outerRadius={62} paddingAngle={3}>
-                      {catDonutData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                    </Pie>
-                    <Tooltip
-                      formatter={(v, n, { payload }) => [fmt(payload.pl), payload.name]}
-                      contentStyle={{ background: "#1e1e2e", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, fontSize: 12 }}
-                      itemStyle={{ color: "#fff" }}
-                      wrapperStyle={{ zIndex: 9999 }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", textAlign: "center", pointerEvents: "none" }}>
-                  <div style={{ fontSize: "0.82rem", fontWeight: 800, color: totalVal >= 0 ? GREEN : RED, lineHeight: 1, whiteSpace: "nowrap" }}>{fmt(totalVal)}</div>
-                  <div style={{ fontSize: "0.5rem", color: MUTE, marginTop: 3 }}>Total</div>
-                </div>
-              </div>
-              <div style={{ marginTop: 10 }}>
-                {catDonutData.map(d => (
-                  <div key={d.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid var(--border)", fontSize: "0.72rem" }}>
-                    <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: d.color, display: "inline-block", flexShrink: 0 }}/>
-                      <span style={{ color: MUTE }}>{d.name}</span>
-                    </span>
-                    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontWeight: 700, color: d.pl >= 0 ? GREEN : RED }}>{fmt(d.pl)}</span>
-                      <span style={{ fontSize: "0.62rem", color: MUTE }}>
-                        {totalAbs > 0 ? (d.value / totalAbs * 100).toFixed(1) : 0}%
-                      </span>
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </>
-            );
-          })() : (
-            <div style={{ textAlign: "center", color: MUTE, padding: 40, fontSize: "0.8rem" }}>Sem dados suficientes</div>
-          )}
-        </div>
-      </div>
 
       {/* ── Métricas detalhadas ── */}
       <div style={{ fontSize: "0.64rem", fontWeight: 700, color: MUTE, textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 12 }}>Métricas Detalhadas</div>
