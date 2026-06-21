@@ -76,6 +76,8 @@ const KNOWN_SYMBOLS_COUNTRY = {
   ERIC:"SE", VOLV:"SE",
   // Irlanda — AT 372
   CRH:"IE",
+  // Portugal — AT 620 (em IBKR aparecem sem sufixo .PT nem ISIN)
+  COR:"PT",  // Corticeira Amorim
   // Japão — AT 392
   TM:"JP",   HMC:"JP",  SONY:"JP", NTT:"JP",
 };
