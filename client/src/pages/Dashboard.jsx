@@ -197,20 +197,62 @@ const IcoCoin = c => <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
 const IcoBar  = c => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg>;
 const IcoBank = c => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="21" x2="21" y2="21"/><line x1="3" y1="10" x2="21" y2="10"/><polyline points="5 6 12 3 19 6"/><line x1="4" y1="10" x2="4" y2="21"/><line x1="20" y1="10" x2="20" y2="21"/><line x1="9" y1="14" x2="9" y2="17"/><line x1="15" y1="14" x2="15" y2="17"/></svg>;
 
+// Intervalos da curva de Total Acumulado (estilo corretora). A janela é ancorada à
+// data mais recente dos dados (não ao "hoje" real), para nunca mostrar um gráfico vazio
+// quando a última operação foi há algum tempo.
+const EQ_RANGES = [
+  ["1D", "1D"], ["5D", "5D"], ["6M", "6M"], ["YTD", "YTD"], ["1A", "1A"],
+  ["3A", "3A"], ["5A", "5A"], ["10A", "10A"], ["MAX", "Max"],
+];
+const EQ_RANGE_LABEL = {
+  "1D": "último dia", "5D": "últimos 5 dias", "6M": "últimos 6 meses",
+  "YTD": "desde o início do ano", "1A": "último ano", "3A": "últimos 3 anos",
+  "5A": "últimos 5 anos", "10A": "últimos 10 anos", "MAX": "desde o início",
+};
+// Devolve a data de início (YYYY-MM-DD) da janela, dado o fim; null = sem limite (MAX).
+function eqRangeStart(rangeKey, endDateStr) {
+  const end = new Date(endDateStr + "T00:00:00");
+  const d = new Date(end);
+  switch (rangeKey) {
+    case "1D":  d.setDate(d.getDate() - 1); break;
+    case "5D":  d.setDate(d.getDate() - 5); break;
+    case "6M":  d.setMonth(d.getMonth() - 6); break;
+    case "YTD": return `${end.getFullYear()}-01-01`;
+    case "1A":  d.setFullYear(d.getFullYear() - 1); break;
+    case "3A":  d.setFullYear(d.getFullYear() - 3); break;
+    case "5A":  d.setFullYear(d.getFullYear() - 5); break;
+    case "10A": d.setFullYear(d.getFullYear() - 10); break;
+    default:    return null; // MAX
+  }
+  return d.toISOString().slice(0, 10);
+}
+
 export default function Dashboard({ user }) {
   const [anos, setAnos]           = useState([]);
   const [ano, setAno]             = useState(null);
   const [stats, setStats]         = useState(null);
-  const [equity, setEquity]       = useState([]);
   const [bySymbol, setBySymbol]   = useState([]);
   const [allTrades, setAllTrades] = useState([]);
   const [allDivs, setAllDivs]     = useState([]);
   const [divTotal, setDivTotal]   = useState(null);
   const [deposits, setDeposits]   = useState([]);
   const [equityAll, setEquityAll] = useState([]);   // equity acumulada desde sempre
-  const [eqScope, setEqScope]     = useState("ano"); // "ano" | "all"
+  const [eqRange, setEqRange]     = useState("MAX"); // 1D|5D|6M|YTD|1A|3A|5A|10A|MAX
   const [modal, setModal]               = useState(null);
+  const [modalStack, setModalStack]     = useState([]);   // histórico para voltar atrás entre modais
   const [loading, setLoading]           = useState(true);
+
+  // Abre um modal a partir de dentro de outro, guardando o anterior para poder voltar.
+  const pushModal = (m) => { setModalStack(s => [...s, modal]); setModal(m); };
+  // Fecha o modal atual: se houver anterior, volta a ele; senão fecha tudo.
+  const closeModal = () => {
+    if (modalStack.length > 0) {
+      setModal(modalStack[modalStack.length - 1]);
+      setModalStack(modalStack.slice(0, -1));
+    } else {
+      setModal(null);
+    }
+  };
   const [anosReady, setAnosReady]       = useState(false);
 
   useEffect(() => {
@@ -227,16 +269,14 @@ export default function Dashboard({ user }) {
     if (!a) return;
     setLoading(true);
     try {
-      const [s, eq, sym, rec, divs, divsAll] = await Promise.all([
+      const [s, sym, rec, divs, divsAll] = await Promise.all([
         axios.get(`/api/trades/stats?ano=${a}`),
-        axios.get(`/api/trades/equity?ano=${a}`),
         axios.get(`/api/trades/by-symbol?ano=${a}`),
         axios.get(`/api/trades?ano=${a}`),
         axios.get(`/api/dividends/total?ano=${a}`),
         axios.get(`/api/dividends?ano=${a}`),
       ]);
       setStats(s.data);
-      setEquity(eq.data);
       setBySymbol(sym.data.slice(0, 10));
       setAllTrades(rec.data);
       setDivTotal(divs.data);
@@ -391,8 +431,23 @@ export default function Dashboard({ user }) {
     { pct: catPct(interestLiq),   label: "Juros",      color: TEAL,  onClick: openInterest,                                 value: interestLiq,   show: interestLiq !== 0 },
   ].filter(c => c.show);
 
-  // Série da curva de equity: ano selecionado ou desde o início
-  const eqData = eqScope === "all" ? equityAll : equity;
+  // Repartição para o donut dedicado (Ações, Opções, CFDs, Dividendos, Juros).
+  // Fatias dimensionadas pelo valor absoluto; legenda mostra o valor com sinal e a % do total absoluto.
+  const catBreakdown = [
+    { label: "Ações",      value: stockSt.pl,   color: BLUE,  onClick: () => openCategory("STOCK", "Ações", "📈"),   show: stockSt.n > 0 },
+    { label: "Opções",     value: optionSt.pl,  color: PINK,  onClick: () => openCategory("OPTION", "Opções", "🎯"), show: optionSt.n > 0 },
+    { label: "CFDs",       value: cfdSt.pl,     color: AMBER, onClick: () => openCategory("CFD", "CFDs", "⚡"),       show: cfdSt.n > 0 },
+    { label: "Dividendos", value: dividendsLiq, color: GREEN, onClick: openDivs,                                     show: dividendsLiq !== 0 },
+    { label: "Juros",      value: interestLiq,  color: TEAL,  onClick: openInterest,                                 show: interestLiq !== 0 },
+  ].filter(c => c.show);
+  const catBreakdownAbs = catBreakdown.reduce((s, c) => s + Math.abs(c.value), 0);
+  const catBreakdownNet = catBreakdown.reduce((s, c) => s + c.value, 0);
+
+  // Série da curva de equity: sempre a série acumulada desde sempre, filtrada pelo
+  // intervalo escolhido (janela ancorada à data mais recente dos dados).
+  const eqEnd   = equityAll.length ? equityAll[equityAll.length - 1].dia : null;
+  const eqStart = eqEnd ? eqRangeStart(eqRange, eqEnd) : null;
+  const eqData  = eqStart ? equityAll.filter(p => p.dia >= eqStart) : equityAll;
   // Posição do zero na curva (para colorir verde acima / vermelho abaixo)
   const eqVals = eqData.map(d => d.equity);
   const eqMax  = eqVals.length ? Math.max(...eqVals, 0) : 0;
@@ -421,9 +476,9 @@ export default function Dashboard({ user }) {
     .reduce((acc, d) => { acc[d.corretora] = (acc[d.corretora] || 0) + d.valor; return acc; }, {});
 
   return (
-    <>
-      {/* ── Header ── */}
-      <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+    <div style={{ height: "calc(100vh - 56px)", display: "flex", flexDirection: "column" }}>
+      {/* ── Header fixo (sempre visível) ── */}
+      <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
         <div>
           <div className="page-title">Visão Geral</div>
           <div className="page-sub">Resumo do desempenho e da sua atividade de trading</div>
@@ -462,6 +517,9 @@ export default function Dashboard({ user }) {
         </div>
       </div>
 
+      {/* ── Conteúdo com scroll ── */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingRight: 4 }}>
+
       {/* ── Top 5 stat icon cards ── */}
       <div style={{ display: "flex", gap: 12, marginBottom: 20, overflowX: "auto", paddingBottom: 4 }}>
         <StatIconCard icon={IcoLine(PINK)}  colorBg="rgba(244,114,182,0.15)" color={PINK}   value={fmt(stats.net_pl ?? 0)}   label="Resultado Líquido" onClick={openAllTrades} />
@@ -472,8 +530,9 @@ export default function Dashboard({ user }) {
         <StatIconCard icon={IcoBar(PURPLE)} colorBg="rgba(167,139,250,0.15)" color={PURPLE} value={pf.toFixed(2)}            label="Profit Factor"     onClick={openAllTrades} />
       </div>
 
-      {/* ── Curva de Equity (largura total) ── */}
-      <div className="card" style={{ padding: 24, display: "flex", gap: 24, marginBottom: 20 }}>
+      {/* ── Total Acumulado + Repartição por categoria (lado a lado) ── */}
+      <div style={{ display: "flex", gap: 16, marginBottom: 20, alignItems: "stretch" }}>
+      <div className="card" style={{ padding: 24, display: "flex", gap: 24, flex: 1, minWidth: 0 }}>
 
           {/* Info column */}
           <div style={{ width: 210, flexShrink: 0, display: "flex", flexDirection: "column" }}>
@@ -528,14 +587,14 @@ export default function Dashboard({ user }) {
           <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
               <div style={{ fontSize: "0.6rem", fontWeight: 700, color: MUTE, textTransform: "uppercase", letterSpacing: ".1em" }}>Curva de Equity</div>
-              <div style={{ display: "flex", gap: 6 }}>
-                {[["ano", `Ano ${ano}`], ["all", "Desde início"]].map(([k, label]) => {
-                  const active = eqScope === k;
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                {EQ_RANGES.map(([k, label]) => {
+                  const active = eqRange === k;
                   const base  = active ? "rgba(96,165,250,0.18)" : "rgba(255,255,255,0.04)";
                   const hover = active ? "rgba(96,165,250,0.28)" : "rgba(255,255,255,0.08)";
                   return (
-                    <button key={k} onClick={() => setEqScope(k)} style={{
-                      padding: "4px 10px", borderRadius: 7, fontSize: "0.68rem", fontWeight: active ? 700 : 600,
+                    <button key={k} onClick={() => setEqRange(k)} style={{
+                      padding: "4px 9px", borderRadius: 7, fontSize: "0.66rem", fontWeight: active ? 700 : 600,
                       cursor: "pointer", whiteSpace: "nowrap", fontFamily: "var(--font)",
                       border: `1px solid ${active ? "rgba(96,165,250,0.45)" : "var(--border)"}`,
                       background: base, color: active ? "#60a5fa" : MUTE,
@@ -579,19 +638,73 @@ export default function Dashboard({ user }) {
               </ResponsiveContainer>
             </div>
             <div style={{ fontSize: "0.62rem", color: MUTE, marginTop: 8, lineHeight: 1.5 }}>
-              Evolução acumulada do resultado das operações {eqScope === "all" ? "desde o início" : `ao longo de ${ano}`} (não inclui dividendos/juros).
+              Evolução acumulada do resultado das operações ({EQ_RANGE_LABEL[eqRange]}) — não inclui dividendos/juros.
             </div>
           </div>
         </div>
 
+        {/* ── Repartição por categoria (donut) ── */}
+        <div className="card" style={{ padding: 24, width: 310, flexShrink: 0, display: "flex", flexDirection: "column" }}>
+          <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "var(--text)", marginBottom: 2 }}>Repartição por Categoria</div>
+          <div style={{ fontSize: "0.72rem", color: MUTE, marginBottom: 12 }}>Ano {ano}</div>
+          {catBreakdown.length === 0 ? (
+            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: MUTE, fontSize: "0.8rem" }}>Sem dados</div>
+          ) : (
+            <>
+              <div style={{ position: "relative", height: 188 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={catBreakdown.map(c => ({ name: c.label, v: Math.abs(c.value) }))} dataKey="v"
+                      innerRadius={54} outerRadius={80} paddingAngle={2} stroke="none">
+                      {catBreakdown.map((c, i) => <Cell key={i} fill={c.color} />)}
+                    </Pie>
+                    <Tooltip formatter={(v, n) => [fmtAbs(v), n]}
+                      wrapperStyle={{ zIndex: 50 }}
+                      contentStyle={{ background: "#252530", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12 }}
+                      itemStyle={{ color: "#fff" }} labelStyle={{ color: "#fff" }} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div style={{ position: "absolute", inset: 0, zIndex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
+                  <div style={{ fontSize: "0.58rem", color: MUTE, textTransform: "uppercase", letterSpacing: ".08em" }}>Total</div>
+                  <div style={{ fontSize: "1.05rem", fontWeight: 800, color: catBreakdownNet >= 0 ? GREEN : RED }}>{fmt(catBreakdownNet)}</div>
+                </div>
+              </div>
+              <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 2 }}>
+                {catBreakdown.map(c => {
+                  const pct = catBreakdownAbs > 0 ? Math.abs(c.value) / catBreakdownAbs * 100 : 0;
+                  return (
+                    <div key={c.label} onClick={c.onClick} style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+                      padding: "6px 6px", borderRadius: 6, cursor: "pointer", transition: "background .15s",
+                    }}
+                      onMouseEnter={e => e.currentTarget.style.background = "var(--hover)"}
+                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                        <span style={{ width: 10, height: 10, borderRadius: 3, background: c.color, flexShrink: 0 }} />
+                        <span style={{ fontSize: "0.84rem", color: "var(--text)" }}>{c.label}</span>
+                      </span>
+                      <span style={{ fontSize: "0.8rem", fontWeight: 700, color: c.value >= 0 ? GREEN : RED, whiteSpace: "nowrap" }}>
+                        {fmt(c.value)} <span style={{ color: MUTE, fontWeight: 600 }}>({pct.toFixed(1)}%)</span>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
         {/* Win/Loss (movido para junto das Métricas Detalhadas) */}
-        <div className="card" style={{ padding: 20, display: "flex", flexDirection: "column", marginBottom: 24 }}>
+        <div className="card" style={{ padding: 20, display: "flex", gap: 24, alignItems: "stretch", marginBottom: 24 }}>
+          {/* Win / Loss (à direita via order) */}
+          <div style={{ order: 2, flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "var(--text)" }}>Win / Loss</div>
             <div style={{ fontSize: "0.72rem", color: MUTE, marginTop: 2 }}>Ano {ano}</div>
           </div>
 
-          <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
 
             {/* Corretoras */}
             <div style={{ width: 130, flexShrink: 0, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -696,35 +809,48 @@ export default function Dashboard({ user }) {
                 </div>
               </div>
             </div>
+
           </div>
 
           <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px dashed rgba(255,255,255,0.1)", fontSize: "0.68rem", color: MUTE, lineHeight: 1.6 }}>
             <strong style={{ color: "var(--text)" }}>Win Rate</strong> é a percentagem de trades encerradas com lucro. Os valores de ganhos e perdas referem-se exclusivamente a operações de trading — <strong style={{ color: "var(--text)" }}>os dividendos não estão incluídos</strong>. Clica em Melhor/Pior Dia para ver os detalhes das operações desse dia.
           </div>
+          </div>
+
+          {/* Divisória vertical "cravada" (sulco: 1px escuro + 1px claro) */}
+          <div aria-hidden="true" style={{ order: 1, alignSelf: "stretch", width: 0, flexShrink: 0, borderLeft: "1px solid rgba(0,0,0,0.30)", borderRight: "1px solid rgba(255,255,255,0.07)" }} />
+
+          {/* Métricas Detalhadas (à esquerda via order) */}
+          <div style={{ order: 0, width: 320, flexShrink: 0, display: "flex", flexDirection: "column" }}>
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "var(--text)" }}>Métricas Detalhadas</div>
+              <div style={{ fontSize: "0.72rem", color: MUTE, marginTop: 2 }}>Ano {ano}</div>
+            </div>
+            {[
+              { label: "Expectancy",      value: fmt(expectancy),           sub: "por trade",                  color: expectancy >= 0 ? GREEN : RED, onClick: openAllTrades },
+              { label: "Max Drawdown",    value: `-${fmtAbs(maxDrawdown)}`, sub: "pico → vale",                color: RED,   onClick: openAllTrades },
+              { label: "Avg Win",         value: fmt(stats.avg_win ?? 0),   sub: "por trade ganho",            color: GREEN, onClick: openWins },
+              { label: "Avg Loss",        value: fmt(stats.avg_loss ?? 0),  sub: "por trade perdido",          color: RED,   onClick: openLosses },
+              { label: "Trades Ganhos",   value: stats.n_wins,              sub: `de ${stats.n_trades} total`, color: GREEN, onClick: openWins },
+              { label: "Trades Perdidos", value: stats.n_losses,            sub: `de ${stats.n_trades} total`, color: RED,   onClick: openLosses },
+            ].map((m, i) => (
+              <div key={m.label} onClick={m.onClick} style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+                padding: "7px 4px", cursor: "pointer", transition: "background .15s",
+                borderTop: i === 0 ? "none" : "1px solid rgba(255,255,255,0.09)",
+              }}
+                onMouseEnter={e => e.currentTarget.style.background = "var(--hover)"}
+                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: "0.8rem", color: "var(--text)", fontWeight: 600 }}>{m.label}</div>
+                  <div style={{ fontSize: "0.6rem", color: MUTE }}>{m.sub}</div>
+                </div>
+                <div style={{ fontSize: "0.92rem", fontWeight: 800, color: m.color, whiteSpace: "nowrap" }}>{m.value}</div>
+              </div>
+            ))}
+          </div>
         </div>
 
-
-      {/* ── Métricas detalhadas ── */}
-      <div style={{ fontSize: "0.64rem", fontWeight: 700, color: MUTE, textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 12 }}>Métricas Detalhadas</div>
-      <div className="metric-grid" style={{ marginBottom: 24 }}>
-        {[
-          { label: "Expectancy",      value: fmt(expectancy),                   sub: "por trade",              color: expectancy >= 0 ? "green" : "red", onClick: openAllTrades },
-          { label: "Max Drawdown",    value: `-${fmtAbs(maxDrawdown)}`,         sub: "pico → vale",            color: "red", onClick: openAllTrades },
-          { label: "Avg Win",         value: fmt(stats.avg_win ?? 0),           sub: "por trade ganho",        color: "green", onClick: openWins },
-          { label: "Avg Loss",        value: fmt(stats.avg_loss ?? 0),          sub: "por trade perdido",      color: "red", onClick: openLosses },
-          { label: "Trades Ganhos",   value: stats.n_wins,                      sub: `de ${stats.n_trades} total`, color: "green", onClick: openWins },
-          { label: "Trades Perdidos", value: stats.n_losses,                    sub: `de ${stats.n_trades} total`, color: "red", onClick: openLosses },
-          { label: "Ações",           value: fmt(stockSt.pl),                   sub: `${stockSt.n} trades · ${stockSt.wr.toFixed(0)}% WR`, color: stockSt.pl >= 0 ? "green" : "red", onClick: () => openCategory("STOCK", "Ações", "📈") },
-          { label: "CFDs",            value: fmt(cfdSt.pl),                     sub: `${cfdSt.n} trades · ${cfdSt.wr.toFixed(0)}% WR`, color: cfdSt.pl >= 0 ? "green" : "red", onClick: () => openCategory("CFD", "CFDs", "⚡") },
-          { label: "Opções",          value: fmt(optionSt.pl),                  sub: `${optionSt.n} trades · ${optionSt.wr.toFixed(0)}% WR`, color: optionSt.pl >= 0 ? "green" : "red", onClick: () => openCategory("OPTION", "Opções", "🎯") },
-        ].map(({ label, value, sub, color, onClick }) => (
-          <div key={label} className="metric-card clickable" onClick={onClick}>
-            <div className="metric-label">{label}</div>
-            <div className={`metric-value ${color}`}>{value}</div>
-            <div className="metric-sub">{sub}</div>
-          </div>
-        ))}
-      </div>
 
       {/* ── P&L por Símbolo + Win/Loss donut (kept) ── */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
@@ -837,10 +963,11 @@ export default function Dashboard({ user }) {
           <span className="trade-date">{t.data_fecho?.slice(0, 10)}</span>
         </div>
       ))}
+      </div>{/* ── fim do conteúdo com scroll ── */}
 
       {/* ── Modal ── */}
       {modal && (
-        <Modal title={modal.title} summary={modal.summary} brokers={modal.brokers} onClose={() => setModal(null)}>
+        <Modal title={modal.title} summary={modal.summary} brokers={modal.brokers} onClose={closeModal}>
           {modal.trades && !modal.detailed && (
             <table className="data-table">
               <thead><tr>
@@ -850,7 +977,7 @@ export default function Dashboard({ user }) {
               <tbody>
                 {modal.trades.map(t => (
                   <tr key={t.id} style={{ cursor: "pointer" }}
-                    onClick={() => setModal({ title: `📌 ${t.simbolo} — ${t.data_fecho?.slice(0,10)??""}`, trades: [t], detailed: true, brokers: brokerTotals([t]), summary: { label: "1 trade", value: t.pl_eur ?? 0 } })}>
+                    onClick={() => pushModal({ title: `📌 ${t.simbolo} — ${t.data_fecho?.slice(0,10)??""}`, trades: [t], detailed: true, brokers: brokerTotals([t]), summary: { label: "1 trade", value: t.pl_eur ?? 0 } })}>
                     <td style={{ fontWeight: 700, color: "var(--text)" }}>{t.simbolo}</td>
                     <td>{t.data_fecho?.slice(0, 10) ?? "—"}</td>
                     <td>{t.tipo_ordem ?? <span style={{ color: MUTE }}>—</span>}</td>
@@ -924,6 +1051,6 @@ export default function Dashboard({ user }) {
           )}
         </Modal>
       )}
-    </>
+    </div>
   );
 }
