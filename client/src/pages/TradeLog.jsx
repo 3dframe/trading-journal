@@ -58,19 +58,19 @@ const LOG_COLS = "110px minmax(130px,1.6fr) 80px 92px 84px 78px 96px 112px 104px
 const LOG_MINW = 960;
 
 // Botão de pré-filtro — segue o estilo "Ver Movimentos" com animação
-function PresetBtn({ active, onClick, children }) {
+function PresetBtn({ active, onClick, children, disabled }) {
   const base   = active ? "rgba(96,165,250,0.18)" : "rgba(255,255,255,0.03)";
   const hover  = active ? "rgba(96,165,250,0.28)" : "rgba(255,255,255,0.07)";
   return (
-    <button onClick={onClick} style={{
+    <button onClick={onClick} disabled={disabled} style={{
       padding: "6px 12px", borderRadius: 8, fontSize: "0.78rem", fontWeight: active ? 700 : 600,
-      cursor: "pointer", whiteSpace: "nowrap",
+      cursor: disabled ? "not-allowed" : "pointer", whiteSpace: "nowrap",
       border: `1px solid ${active ? "rgba(96,165,250,0.45)" : "var(--border)"}`,
-      background: base, color: active ? "#60a5fa" : MUTE,
+      background: base, color: active ? "#60a5fa" : MUTE, opacity: disabled ? 0.4 : 1,
       transition: "background .15s, transform .15s", fontFamily: "var(--font)",
     }}
-      onMouseEnter={e => { e.currentTarget.style.background = hover; e.currentTarget.style.transform = "translateY(-1px)"; }}
-      onMouseLeave={e => { e.currentTarget.style.background = base;  e.currentTarget.style.transform = "translateY(0)"; }}
+      onMouseEnter={e => { if (disabled) return; e.currentTarget.style.background = hover; e.currentTarget.style.transform = "translateY(-1px)"; }}
+      onMouseLeave={e => { if (disabled) return; e.currentTarget.style.background = base;  e.currentTarget.style.transform = "translateY(0)"; }}
     >{children}</button>
   );
 }
@@ -189,10 +189,13 @@ function TradeDetail({ t }) {
 
 // Calendário de intervalo (dias do mês vivos, dias do mês adjacente a cinzento)
 const WEEKDAYS_PT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+const MONTHS_PT   = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 function RangeCalendar({ from, to, onChange }) {
   const init = from ? new Date(from + "T00:00:00") : new Date();
   const [view, setView] = useState(new Date(init.getFullYear(), init.getMonth(), 1));
+  const [mode, setMode] = useState("days");          // "days" | "months" | "years"
   const y = view.getFullYear(), m = view.getMonth();
+  const yearBlock = Math.floor(y / 12) * 12;          // bloco de 12 anos para a grelha de anos
   const firstDow = (new Date(y, m, 1).getDay() + 6) % 7;       // segunda = 0
   const dim      = new Date(y, m + 1, 0).getDate();
   const prevDim  = new Date(y, m, 0).getDate();
@@ -214,11 +217,38 @@ function RangeCalendar({ from, to, onChange }) {
     color: "#60a5fa", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center",
     transition: "background .15s, transform .15s",
   };
+  const navStep = dir => {
+    if (mode === "months")     setView(new Date(y + dir, m, 1));        // ±1 ano
+    else if (mode === "years") setView(new Date(y + dir * 12, m, 1));  // ±1 bloco de 12 anos
+    else                       setView(new Date(y, m + dir, 1));        // ±1 mês
+  };
   const nav = dir => ({
-    onClick: () => setView(new Date(y, m + dir, 1)),
+    onClick: () => navStep(dir),
     onMouseEnter: e => { e.currentTarget.style.background = "rgba(96,165,250,0.22)"; e.currentTarget.style.transform = "translateY(-1px)"; },
     onMouseLeave: e => { e.currentTarget.style.background = "rgba(96,165,250,0.12)"; e.currentTarget.style.transform = "translateY(0)"; },
     style: navStyle,
+  });
+
+  // Título central clicável: dias → meses → anos
+  const titleLabel = mode === "days"
+    ? view.toLocaleDateString("pt-PT", { month: "long", year: "numeric" })
+    : mode === "months"
+      ? String(y)
+      : `${yearBlock} – ${yearBlock + 11}`;
+  const titleBtn = {
+    fontWeight: 700, fontSize: "0.85rem", color: "var(--text)", textTransform: "capitalize",
+    background: "none", border: "none", cursor: mode === "years" ? "default" : "pointer",
+    padding: "4px 8px", borderRadius: 7, fontFamily: "var(--font)", transition: "background .15s",
+  };
+  const onTitleClick = () => setMode(mode === "days" ? "months" : mode === "months" ? "years" : "years");
+
+  // Célula reutilizável para grelhas de mês/ano
+  const cellBtn = (active) => ({
+    height: 40, borderRadius: 8, cursor: "pointer", fontSize: "0.8rem",
+    fontWeight: active ? 800 : 600,
+    border: "1px solid " + (active ? "rgba(96,165,250,0.6)" : "transparent"),
+    background: active ? "rgba(96,165,250,0.30)" : "transparent",
+    color: active ? "#bcd4ff" : "var(--text)", transition: "background .12s",
   });
 
   return (
@@ -229,11 +259,13 @@ function RangeCalendar({ from, to, onChange }) {
     }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <button {...nav(-1)}>‹</button>
-        <span style={{ fontWeight: 700, fontSize: "0.85rem", color: "var(--text)", textTransform: "capitalize" }}>
-          {view.toLocaleDateString("pt-PT", { month: "long", year: "numeric" })}
-        </span>
+        <button onClick={onTitleClick} style={titleBtn}
+          onMouseEnter={e => { if (mode !== "years") e.currentTarget.style.background = "rgba(96,165,250,0.12)"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "none"; }}
+        >{titleLabel}</button>
         <button {...nav(1)}>›</button>
       </div>
+      {mode === "days" && (<>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 4 }}>
         {WEEKDAYS_PT.map(w => (
           <div key={w} style={{ textAlign: "center", fontSize: "0.6rem", fontWeight: 700, color: MUTE, textTransform: "uppercase" }}>{w}</div>
@@ -262,6 +294,37 @@ function RangeCalendar({ from, to, onChange }) {
           );
         })}
       </div>
+      </>)}
+
+      {mode === "months" && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+          {MONTHS_PT.map((label, i) => {
+            const active = i === m;
+            const st = cellBtn(active);
+            return (
+              <button key={label} onClick={() => { setView(new Date(y, i, 1)); setMode("days"); }} style={st}
+                onMouseEnter={e => { if (!active) e.currentTarget.style.background = "rgba(255,255,255,0.07)"; }}
+                onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}
+              >{label}</button>
+            );
+          })}
+        </div>
+      )}
+
+      {mode === "years" && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+          {Array.from({ length: 12 }, (_, i) => yearBlock + i).map(yr => {
+            const active = yr === y;
+            const st = cellBtn(active);
+            return (
+              <button key={yr} onClick={() => { setView(new Date(yr, m, 1)); setMode("months"); }} style={st}
+                onMouseEnter={e => { if (!active) e.currentTarget.style.background = "rgba(255,255,255,0.07)"; }}
+                onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}
+              >{yr}</button>
+            );
+          })}
+        </div>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10, fontSize: "0.7rem", color: MUTE }}>
         <span>{from ? from : "—"} {to ? `→ ${to}` : from ? "→ …" : ""}</span>
         <button onClick={() => onChange("", "")} style={{
@@ -286,6 +349,8 @@ export default function TradeLog() {
   const [showCal, setShowCal]       = useState(false);
   const [expanded, setExpanded]     = useState(null);
   const [loading, setLoading]       = useState(true);
+  const [page, setPage]             = useState(0);
+  const [pageSize, setPageSize]     = useState(50);   // 0 = mostrar todos
 
   useEffect(() => {
     setLoading(true);
@@ -360,6 +425,16 @@ export default function TradeLog() {
   const tradeTotal = trades.reduce((s, t) => s + (t.pl_eur ?? 0), 0);
   const divTotal   = divs.reduce((s, d) => s + (d.valor_liq_eur ?? 0), 0);
   const total      = tradeTotal + divTotal;     // depósitos/levantamentos não entram no P&L
+
+  // Volta à 1ª página sempre que os filtros ou o tamanho de página mudam
+  useEffect(() => { setPage(0); setExpanded(null); }, [categoria, resultado, simbolo, corretora, preset, customFrom, customTo, pageSize]);
+
+  // Paginação do lado do cliente (pageSize 0 = todos) — evita renderizar milhares de linhas de uma vez
+  const totalPages = pageSize === 0 ? 1 : Math.max(1, Math.ceil(rows.length / pageSize));
+  const curPage    = Math.min(page, totalPages - 1);
+  const start      = pageSize === 0 ? 0 : curPage * pageSize;
+  const end        = pageSize === 0 ? rows.length : Math.min(start + pageSize, rows.length);
+  const pagedRows  = pageSize === 0 ? rows : rows.slice(start, end);
 
   return (
     <div style={{ height: "calc(100vh - 56px)", display: "flex", flexDirection: "column" }}>
@@ -475,7 +550,7 @@ export default function TradeLog() {
       ) : (
       <div style={{ overflowX: "auto" }}>
        <div style={{ minWidth: LOG_MINW }}>
-        {rows.map(row => {
+        {pagedRows.map(row => {
         if (row._type === "trade") {
           const t = row;
           const key = `t-${t.id}`;
@@ -622,6 +697,31 @@ export default function TradeLog() {
       </div>
       )}
       </div>{/* fim da zona com scroll */}
+
+      {/* ── Rodapé de paginação (sempre visível) ── */}
+      {!loading && rows.length > 0 && (
+        <div style={{
+          flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between",
+          gap: 12, flexWrap: "wrap", paddingTop: 12, marginTop: 4, borderTop: "1px solid var(--border)",
+        }}>
+          <div style={{ fontSize: "0.75rem", color: MUTE }}>
+            A mostrar {start + 1}–{end} de {rows.length}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <PresetBtn onClick={() => setPage(curPage - 1)} disabled={curPage <= 0}>‹ Anterior</PresetBtn>
+            <span style={{ fontSize: "0.78rem", color: "var(--text)", fontWeight: 600, minWidth: 96, textAlign: "center" }}>
+              Página {curPage + 1} de {totalPages}
+            </span>
+            <PresetBtn onClick={() => setPage(curPage + 1)} disabled={curPage >= totalPages - 1}>Seguinte ›</PresetBtn>
+            <select value={pageSize} onChange={e => setPageSize(Number(e.target.value))} style={{ marginLeft: 4 }}>
+              <option value={25}>25 / página</option>
+              <option value={50}>50 / página</option>
+              <option value={100}>100 / página</option>
+              <option value={0}>Todos</option>
+            </select>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
