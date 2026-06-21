@@ -31,3 +31,4 @@ server/users.json
 server/sessions/
 server/logs/
 server/data/
+server/fxrates.db*

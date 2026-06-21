@@ -2,6 +2,7 @@ const express  = require("express");
 const bcrypt   = require("bcrypt");
 const fs       = require("fs");
 const path     = require("path");
+const fx       = require("../fx");
 
 const router     = express.Router();
 const USERS_FILE = path.join(__dirname, "..", "users.json");
@@ -80,6 +81,21 @@ router.get("/logs", (req, res) => {
   if (!fs.existsSync(LOGS_FILE)) return res.json([]);
   const logs = JSON.parse(fs.readFileSync(LOGS_FILE, "utf8"));
   res.json(logs.slice().reverse().slice(0, 100));
+});
+
+// GET /api/admin/fx — estado da tabela local de câmbios do BCE
+router.get("/fx", (req, res) => {
+  res.json(fx.status());
+});
+
+// POST /api/admin/fx/update — descarrega e repopula a tabela do BCE (opt-in)
+router.post("/fx/update", async (req, res) => {
+  try {
+    const result = await fx.updateFromEcb();
+    res.json(result);
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
 });
 
 module.exports = router;

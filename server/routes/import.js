@@ -2,8 +2,8 @@ const express  = require("express");
 const multer   = require("multer");
 const path     = require("path");
 const fs       = require("fs");
-const https    = require("https");
 const ExcelJS  = require("exceljs");
+const fx       = require("../fx");
 const { getDb, clearDb } = require("../db");
 
 const router   = express.Router();
@@ -173,36 +173,13 @@ function resolveDividendCountry(symbol, isinIso, currency) {
   return resolveCountry(symbol, isinIso, currency);
 }
 
-// ── Taxa de câmbio histórica (frankfurter.app / BCE) ──────
-// TODO (§6 privacidade): esta função viola instructions.md §6 ao enviar moeda e data
-// de cada trade IBKR para api.frankfurter.app (servidor externo).
-// Solução planeada: substituir por tabela local do BCE (eurofxref-hist.zip) com
-// endpoint de atualização manual opt-in. Ver secção 3 do audit de conformidade.
-const rateCache = new Map();
-function fetchEURRate(currency, dateStr) {
-  if (!currency || currency === "EUR") return Promise.resolve(1.0);
-  const date = (dateStr || "").slice(0, 10);
-  if (!date || date < "2000-01-01") return Promise.resolve(null);
-  const key = `${currency}|${date}`;
-  if (rateCache.has(key)) return Promise.resolve(rateCache.get(key));
-
-  return new Promise(resolve => {
-    const url = `https://api.frankfurter.app/${date}?from=${currency}&to=EUR`;
-    const req = https.get(url, res => {
-      let body = "";
-      res.on("data", d => body += d);
-      res.on("end", () => {
-        try {
-          const json = JSON.parse(body);
-          const rate = json.rates?.EUR;
-          if (rate) { rateCache.set(key, rate); return resolve(rate); }
-        } catch {}
-        resolve(null);
-      });
-    });
-    req.on("error", () => resolve(null));
-    req.setTimeout(5000, () => { req.destroy(); resolve(null); });
-  });
+// ── Taxa de câmbio histórica (tabela local do BCE) ────────
+// Conformidade §6: nenhuma informação de operações sai do servidor. As taxas vêm
+// da tabela local alimentada pelo eurofxref-hist do BCE (ver ../fx.js e o endpoint
+// admin POST /api/admin/fx/update). Devolve EUR por 1 unidade da moeda, ou null se
+// a tabela não tiver cotação para a data (ex.: tabela ainda não atualizada).
+function eurRate(currency, dateStr) {
+  return fx.eurPerUnit(currency, dateStr);
 }
 
 // ── Helpers ───────────────────────────────────────────────
@@ -232,6 +209,16 @@ function cellVal(cell) {
   return cell.value;
 }
 
+// Moeda da conta XTB por número de conta. O relatório XTB reporta TUDO na moeda da
+// conta (não na do instrumento): contas em EUR já vêm em euros, mas contas noutra
+// moeda (ex.: USD) vêm sem qualquer conversão. Para essas é preciso converter para
+// EUR à data de cada operação. Mantemos um override explícito (fonte de verdade) por
+// não ser fiável auto-detetar a moeda do cabeçalho do ficheiro. Acrescenta aqui novas
+// contas não-EUR. Contas em falta assumem EUR (comportamento anterior, sem regressão).
+const XTB_ACCOUNT_CURRENCY = {
+  "52663818": "USD",
+};
+
 // ── Parser XTB (.xlsx) ────────────────────────────────────
 async function parseXTB(buffer) {
   const wb = new ExcelJS.Workbook();
@@ -249,6 +236,10 @@ async function parseXTB(buffer) {
       }
     }
   });
+
+  // Moeda da conta (override por nº de conta; default EUR). Para contas não-EUR
+  // os valores vêm na moeda da conta e são convertidos para EUR no fim da função.
+  const accountCurrency = (XTB_ACCOUNT_CURRENCY[accountNumber] || "EUR").toUpperCase();
 
   // ── Aba de operações fechadas ──
   let sheet = null, headerRowNum = 1;
@@ -330,7 +321,7 @@ async function parseXTB(buffer) {
         : saleVal - purchaseVal - commission;
 
     const posId = iPos >= 0 ? get(iPos)?.toString().trim() : null;
-    const pais  = resolveCountry(symStr, null, "EUR");
+    const pais  = resolveCountry(symStr, null, accountCurrency);
 
     trades.push({
       simbolo:          symStr.split(".")[0].toUpperCase(),
@@ -355,7 +346,7 @@ async function parseXTB(buffer) {
       origem:           iCloseOrig  >= 0 ? get(iCloseOrig)?.toString().trim() || null : null,
       conversao_abertura: iOpenConv  >= 0 ? toFloat(get(iOpenConv))  || null : null,
       conversao_fecho:    iCloseConv >= 0 ? toFloat(get(iCloseConv)) || null : null,
-      moeda_original:   "EUR",
+      moeda_original:   accountCurrency,
       taxa_cambio:      1.0,
       categoria:        isCFD ? "CFD" : "STOCK",
       corretora:        "XTB",
@@ -433,7 +424,7 @@ async function parseXTB(buffer) {
         // Agrupa juros do mesmo dia
         const key = date?.slice(0, 10) || "?";
         if (!interestMap.has(key)) {
-          interestMap.set(key, { simbolo: "JUROS_XTB", data_pagamento: date, valor_bruto_eur: 0, retencao_eur: 0, valor_liq_eur: 0, pais_fonte: "Polónia", moeda: "EUR", corretora: "XTB", conta: accountNumber, conta_nome: null, produto: opProduct, tipo: "INTEREST", _movs: [] });
+          interestMap.set(key, { simbolo: "JUROS_XTB", data_pagamento: date, valor_bruto_eur: 0, retencao_eur: 0, valor_liq_eur: 0, pais_fonte: "Polónia", moeda: accountCurrency, corretora: "XTB", conta: accountNumber, conta_nome: null, produto: opProduct, tipo: "INTEREST", _movs: [] });
         }
         interestMap.get(key).valor_bruto_eur += Math.abs(amount);
         interestMap.get(key)._movs.push({ id: opId, tipo: "Free funds interest", valor: amount, data: date });
@@ -464,14 +455,14 @@ async function parseXTB(buffer) {
       const sym = (get(cSym) || "").toString().trim();
       if (!sym) return;
       const key = `${sym}|${date?.slice(0, 10)}`;
-      const pais = resolveDividendCountry(sym, null, "EUR");
+      const pais = resolveDividendCountry(sym, null, accountCurrency);
 
       if (isDivid || isWithhold) {
         // A linha de "Withholding tax" pode aparecer ANTES da linha "Dividend" correspondente
         // no ficheiro (a XTB não garante a ordem) — por isso o agregado tem de ser criado em
         // qualquer um dos dois casos, nunca só quando já existe (senão a 1ª retenção perde-se).
         if (!divMap.has(key)) {
-          divMap.set(key, { simbolo: sym.split(".")[0].toUpperCase(), data_pagamento: date, valor_bruto_eur: 0, retencao_eur: 0, moeda: "EUR", corretora: "XTB", conta: accountNumber, conta_nome: null, nome_instrumento: opInstrument, produto: opProduct, pais_fonte: pais, tipo: "DIVIDEND", _movs: [] });
+          divMap.set(key, { simbolo: sym.split(".")[0].toUpperCase(), data_pagamento: date, valor_bruto_eur: 0, retencao_eur: 0, moeda: accountCurrency, corretora: "XTB", conta: accountNumber, conta_nome: null, nome_instrumento: opInstrument, produto: opProduct, pais_fonte: pais, tipo: "DIVIDEND", _movs: [] });
         }
         if (isDivid) divMap.get(key).valor_bruto_eur += amount;
         else         divMap.get(key).retencao_eur    += Math.abs(amount);
@@ -500,7 +491,32 @@ async function parseXTB(buffer) {
   if (!trades.length && !dividends.length && !deposits.length)
     throw new Error("Nenhuma operação encontrada no ficheiro XTB.");
 
-  return { trades, dividends, deposits };
+  // ── Conversão cambial para EUR (apenas contas não-EUR) ──
+  // O XTB reporta na moeda da conta; para contas em EUR não há nada a converter.
+  // Os preços por ação (preco_abertura/fecho, sl, tp) ficam na moeda original — são
+  // cotações de mercado, não montantes em conta.
+  const convFailed = [];
+  if (accountCurrency !== "EUR") {
+    const TRADE_MONEY = ["pl_eur", "valor_compra_eur", "valor_venda_eur", "fees", "swap", "rollover", "gross_pl", "margin"];
+    for (const t of trades) {
+      const rate = eurRate(accountCurrency, t.data_fecho);
+      if (!rate) { convFailed.push(t.simbolo); continue; }
+      for (const f of TRADE_MONEY) if (t[f] != null) t[f] = +(t[f] * rate).toFixed(4);
+      t.taxa_cambio = rate;
+    }
+    for (const d of dividends) {
+      const rate = eurRate(accountCurrency, d.data_pagamento);
+      if (!rate) { convFailed.push(d.simbolo); continue; }
+      for (const f of ["valor_bruto_eur", "retencao_eur", "valor_liq_eur"]) if (d[f] != null) d[f] = +(d[f] * rate).toFixed(4);
+    }
+    for (const dp of deposits) {
+      const rate = eurRate(accountCurrency, dp.data);
+      if (!rate) continue;
+      dp.valor = +(dp.valor * rate).toFixed(4);
+    }
+  }
+
+  return { trades, dividends, deposits, convFailed };
 }
 
 // Parser de uma linha CSV que respeita aspas (campos com vírgula lá dentro,
@@ -739,7 +755,7 @@ async function parseIBKR(buffer) {
   for (const idx of needsConv) {
     const t    = trades[idx];
     const date = t.data_fecho;
-    const rate = await fetchEURRate(t.moeda_original, date);
+    const rate = eurRate(t.moeda_original, date);
     if (rate) {
       t.pl_eur           = +(t.pl_eur           * rate).toFixed(4);
       t.valor_compra_eur = +(t.valor_compra_eur  * rate).toFixed(4);
@@ -755,7 +771,7 @@ async function parseIBKR(buffer) {
   // Converte dividendos IBKR não-EUR
   for (const d of dividends) {
     if (d._currency && d._currency !== "EUR") {
-      const rate = await fetchEURRate(d._currency, d.data_pagamento);
+      const rate = eurRate(d._currency, d.data_pagamento);
       if (rate) {
         d.valor_bruto_eur = +(d.valor_bruto_eur * rate).toFixed(4);
         d.retencao_eur    = +(d.retencao_eur    * rate).toFixed(4);
@@ -890,9 +906,10 @@ router.post("/preview", upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "Nenhum ficheiro enviado." });
   const tipo = req.body.tipo;
   try {
+    await fx.ensureFresh();   // garante câmbios frescos antes de converter (no-op se já atualizados)
     let trades = [], dividends = [], deposits = [], convFailed = [];
     if (tipo === "xtb") {
-      ({ trades, dividends, deposits } = await parseXTB(req.file.buffer));
+      ({ trades, dividends, deposits, convFailed = [] } = await parseXTB(req.file.buffer));
     } else if (tipo === "ibkr") {
       ({ trades, dividends, deposits, convFailed = [] } = await parseIBKR(req.file.buffer));
     } else {
@@ -920,9 +937,10 @@ router.post("/confirm", upload.single("file"), async (req, res) => {
 
   const tipo = req.body.tipo;
   try {
+    await fx.ensureFresh();   // garante câmbios frescos antes de converter (no-op se já atualizados)
     let trades = [], dividends = [], deposits = [], convFailed = [];
     if (tipo === "xtb") {
-      ({ trades, dividends, deposits } = await parseXTB(req.file.buffer));
+      ({ trades, dividends, deposits, convFailed = [] } = await parseXTB(req.file.buffer));
     } else if (tipo === "ibkr") {
       ({ trades, dividends, deposits, convFailed = [] } = await parseIBKR(req.file.buffer));
     } else {
