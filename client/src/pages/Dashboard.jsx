@@ -256,7 +256,18 @@ export default function Dashboard({ user }) {
   const [anosReady, setAnosReady]       = useState(false);
 
   useEffect(() => {
-    axios.get("/api/trades/anos").then(r => {
+    // Pedido que "porteia" a página: se falhar transitoriamente no arranque mostraria o
+    // ecrã "sem dados". Tenta algumas vezes com backoff antes de desistir (ver load()).
+    const getAnosWithRetry = async (tries = 3) => {
+      for (let attempt = 1; attempt <= tries; attempt++) {
+        try { return await axios.get("/api/trades/anos"); }
+        catch (e) {
+          if (attempt < tries) { await new Promise(r => setTimeout(r, 400 * attempt)); continue; }
+          throw e;
+        }
+      }
+    };
+    getAnosWithRetry().then(r => {
       setAnos(r.data);
       if (r.data.length) setAno(r.data[0]);
       else setLoading(false); // sem nenhum ano (nem trades nem dividendos) — não há nada para carregar
@@ -268,23 +279,35 @@ export default function Dashboard({ user }) {
   const load = useCallback(async (a) => {
     if (!a) return;
     setLoading(true);
-    try {
-      const [s, sym, rec, divs, divsAll] = await Promise.all([
-        axios.get(`/api/trades/stats?ano=${a}`),
-        axios.get(`/api/trades/by-symbol?ano=${a}`),
-        axios.get(`/api/trades?ano=${a}`),
-        axios.get(`/api/dividends/total?ano=${a}`),
-        axios.get(`/api/dividends?ano=${a}`),
-      ]);
-      setStats(s.data);
-      setBySymbol(sym.data.slice(0, 10));
-      setAllTrades(rec.data);
-      setDivTotal(divs.data);
-      setAllDivs(divsAll.data);
-    } catch {
-      setStats(null);
-    } finally {
-      setLoading(false);
+    // Na primeira entrada o backend recebe um burst de pedidos em paralelo enquanto
+    // ainda está a "aquecer" (1ª abertura da BD + leituras concorrentes do ficheiro de
+    // sessão). Em Windows uma dessas leituras falha ocasionalmente. Como é transitório
+    // (um refresh resolve), tentamos automaticamente algumas vezes antes de desistir.
+    const MAX_TRIES = 3;
+    for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
+      try {
+        const [s, sym, rec, divs, divsAll] = await Promise.all([
+          axios.get(`/api/trades/stats?ano=${a}`),
+          axios.get(`/api/trades/by-symbol?ano=${a}`),
+          axios.get(`/api/trades?ano=${a}`),
+          axios.get(`/api/dividends/total?ano=${a}`),
+          axios.get(`/api/dividends?ano=${a}`),
+        ]);
+        setStats(s.data);
+        setBySymbol(sym.data.slice(0, 10));
+        setAllTrades(rec.data);
+        setDivTotal(divs.data);
+        setAllDivs(divsAll.data);
+        setLoading(false);
+        return;
+      } catch {
+        if (attempt < MAX_TRIES) {
+          await new Promise(r => setTimeout(r, 400 * attempt)); // backoff: 400ms, 800ms
+          continue;
+        }
+        setStats(null);
+        setLoading(false);
+      }
     }
   }, []);
 
