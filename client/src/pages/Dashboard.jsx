@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback } from "react";
 import axios from "axios";
 import {
   BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
@@ -243,7 +243,12 @@ export default function Dashboard({ user }) {
   const [loading, setLoading]           = useState(true);
 
   // Abre um modal a partir de dentro de outro, guardando o anterior para poder voltar.
-  const pushModal = (m) => { setModalStack(s => [...s, modal]); setModal(m); };
+  // `parentPatch` permite anotar o modal-pai (ex: { selectedId } da linha clicada) para
+  // que, ao voltar atrás, se possa destacar e fazer scroll até essa linha.
+  const pushModal = (m, parentPatch = {}) => {
+    setModalStack(s => [...s, { ...modal, ...parentPatch }]);
+    setModal(m);
+  };
   // Fecha o modal atual: se houver anterior, volta a ele; senão fecha tudo.
   const closeModal = () => {
     if (modalStack.length > 0) {
@@ -253,6 +258,13 @@ export default function Dashboard({ user }) {
       setModal(null);
     }
   };
+
+  // Ao voltar a um modal com linha previamente clicada, faz scroll até ela (centrada).
+  useLayoutEffect(() => {
+    if (modal?.selectedId == null) return;
+    const el = document.querySelector(`.modal-body [data-modal-row="${modal.selectedId}"]`);
+    if (el) el.scrollIntoView({ block: "center" });
+  }, [modal]);
   const [anosReady, setAnosReady]       = useState(false);
 
   useEffect(() => {
@@ -999,8 +1011,17 @@ export default function Dashboard({ user }) {
               </tr></thead>
               <tbody>
                 {modal.trades.map(t => (
-                  <tr key={t.id} style={{ cursor: "pointer" }}
-                    onClick={() => pushModal({ title: `📌 ${t.simbolo} — ${t.data_fecho?.slice(0,10)??""}`, trades: [t], detailed: true, brokers: brokerTotals([t]), summary: { label: "1 trade", value: t.pl_eur ?? 0 } })}>
+                  <tr key={t.id} data-modal-row={t.id}
+                    style={{
+                      cursor: "pointer",
+                      outline: modal.selectedId === t.id ? "2px solid var(--accent)" : "none",
+                      outlineOffset: "-2px",
+                      background: modal.selectedId === t.id ? "var(--hover)" : undefined,
+                    }}
+                    onClick={() => pushModal(
+                      { title: `📌 ${t.simbolo} — ${t.data_fecho?.slice(0,10)??""}`, trades: [t], detailed: true, brokers: brokerTotals([t]), summary: { label: "1 trade", value: t.pl_eur ?? 0 } },
+                      { selectedId: t.id },
+                    )}>
                     <td style={{ fontWeight: 700, color: "var(--text)" }}>{t.simbolo}</td>
                     <td>{t.data_fecho?.slice(0, 10) ?? "—"}</td>
                     <td>{t.tipo_ordem ?? <span style={{ color: MUTE }}>—</span>}</td>
