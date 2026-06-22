@@ -59,6 +59,7 @@ const KNOWN_SYMBOLS_COUNTRY = {
   // Alemanha — AT 276
   SAP:"DE",  BAYN:"DE", BMW:"DE",  DTE:"DE",  ALV:"DE",  MBG:"DE",
   SIE:"DE",  VOW:"DE",  ADS:"DE",  BAS:"DE",  EOAN:"DE", RWE:"DE",
+  AFXD:"DE", // Carl Zeiss Meditec AG (DE0005313704) — em IBKR sem sufixo nem ISIN captado
   // Países Baixos — AT 528
   ASML:"NL", SHEL:"NL", PHG:"NL",  HEIA:"NL", WKL:"NL",
   // Reino Unido — AT 826
@@ -76,6 +77,12 @@ const KNOWN_SYMBOLS_COUNTRY = {
   ERIC:"SE", VOLV:"SE",
   // Irlanda — AT 372
   CRH:"IE",
+  // ETFs UCITS domiciliados na Irlanda (em IBKR aparecem sem sufixo nem ISIN captado).
+  // O ISIN US (versão americana) é resolvido antes por sufixo/ISIN, por isso estes só
+  // se aplicam à versão UCITS irlandesa negociada em EUR sem ISIN no relatório.
+  QDVE:"IE", // iShares S&P 500 IT Sector UCITS (IE00B3WJKG14)
+  NQSE:"IE", // iShares Nasdaq 100 EUR-H Acc UCITS (IE00BYVQ9F29)
+  SMH:"IE",  // VanEck Semiconductor UCITS (IE00BMC38736) — distinta da VanEck US (US92189F6768)
   // Portugal — AT 620 (em IBKR aparecem sem sufixo .PT nem ISIN)
   COR:"PT",  // Corticeira Amorim
   // Japão — AT 392
@@ -552,9 +559,12 @@ async function parseIBKR(buffer) {
   const parsed = lines.map(parseCSVLine);
 
   // ── Passo 1: pré-passagem para extrair ISINs ──────────────
-  // A secção "Financial Instrument Information" do CSV da IBKR contém a coluna ISIN
-  // mapeada pelo Symbol. As duas primeiras letras do ISIN identificam o país de
-  // incorporação da empresa (ISO 3166-1 alpha-2) — fonte mais fiável de país.
+  // A secção "Financial Instrument Information" do CSV da IBKR contém o ISIN mapeado pelo
+  // Symbol. ATENÇÃO: nos relatórios da IBKR a coluna chama-se "Security ID" (não "ISIN") e
+  // pode conter outros identificadores (CUSIP, etc.) — por isso validamos o formato ISIN.
+  // As duas primeiras letras do ISIN identificam o país de incorporação (ISO 3166-1
+  // alpha-2) — fonte mais fiável de país.
+  const ISIN_RE = /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/;
   const isinBySymbol = new Map(); // symbol → prefixo ISO 2 letras (ex: "DE")
   let fiiHeaders = null;
   // Número e nome de conta — secção "Account Information" (Field Name "Account"/"Name")
@@ -576,8 +586,8 @@ async function parseIBKR(buffer) {
     if (cols[0] === "Financial Instrument Information" && cols[1] === "Data" && fiiHeaders) {
       const g    = key => { const i = fiiHeaders.indexOf(key); return i >= 0 ? cols[i] : null; };
       const sym  = (g("Symbol") || "").replace(/\s/g, "").toUpperCase();
-      const isin = (g("ISIN") || "").trim();
-      if (sym && isin.length >= 2) isinBySymbol.set(sym, isin.slice(0, 2).toUpperCase());
+      const isin = (g("Security ID") || g("ISIN") || "").trim().toUpperCase();
+      if (sym && ISIN_RE.test(isin)) isinBySymbol.set(sym, isin.slice(0, 2));
     }
   }
 
