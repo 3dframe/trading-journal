@@ -5,6 +5,11 @@
 ## Em curso
 - (nada a meio)
 
+## Por validar (no browser, próxima sessão)
+- **Modais com linha selecionada**: ao clicar numa linha da tabela de um modal e abrir o
+  detalhe, ao voltar atrás a linha fica destacada (contorno `--accent`) e faz-se scroll
+  até ela (antes voltava ao topo). Confirmar UX em http://localhost:5173.
+
 ## Pendente (decisão do utilizador)
 - Redundância: o card "Categorias" (mini-donuts) duplica o novo donut "Repartição por
   Categoria" — decidir se se remove.
@@ -36,6 +41,10 @@
   cortando pedidos (resposta vazia). Script `dev` passou a ignorar `data/`, `users.json`
   e `logs/` (além de `sessions/`). Aplicar exige reiniciar o nodemon (os `--ignore` são
   args do processo).
+- **Modais — linha clicada destacada e scroll de regresso**: ao abrir o detalhe a partir
+  de uma linha de tabela num modal (`pushModal`), guarda-se `selectedId` no modal-pai; ao
+  voltar, a linha ganha contorno (`--accent`) e faz-se `scrollIntoView` até ela (antes a
+  tabela voltava ao topo). Em `Dashboard.jsx`. Falta validar no browser.
 
 ## Feito na sessão de 2026-06-21
 - **Câmbios locais do BCE** (`server/fx.js`) com atualização automática; §6 resolvido;
