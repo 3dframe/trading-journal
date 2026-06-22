@@ -4,7 +4,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon --ignore sessions/ index.js"
+    "dev": "nodemon --ignore sessions/ --ignore data/ --ignore users.json --ignore logs/ index.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
