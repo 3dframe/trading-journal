@@ -60,10 +60,11 @@ export default function Settings({ user, fullName, onFullNameChange }) {
   const [savingPw, setSavingPw] = useState(false);
 
   const [toast, setToast] = useState(null);
+  const [confirmModal, setConfirmModal] = useState(null);
 
   const showToast = (msg, type = "ok") => {
     setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
+    setTimeout(() => setToast(null), 4000);
   };
 
   const saveName = async () => {
@@ -84,11 +85,23 @@ export default function Settings({ user, fullName, onFullNameChange }) {
     if (!curPw || !newPw || !confPw) { showToast("Preenche todos os campos.", "err"); return; }
     if (newPw !== confPw) { showToast("As passwords não coincidem.", "err"); return; }
     if (newPw.length < 6) { showToast("A nova password deve ter pelo menos 6 caracteres.", "err"); return; }
+    
+    // Mostrar confirmação
+    setConfirmModal({
+      title: "Confirmar Alteração de Password",
+      message: "Tem a certeza que deseja alterar a password?",
+      onConfirm: confirmChangePassword,
+      onCancel: () => setConfirmModal(null),
+    });
+  };
+
+  const confirmChangePassword = async () => {
+    setConfirmModal(null);
     setSavingPw(true);
     try {
       await axios.post("/api/auth/change-password", { currentPassword: curPw, newPassword: newPw });
       setCurPw(""); setNewPw(""); setConfPw("");
-      showToast("Password alterada com sucesso.");
+      showToast("✓ Password alterada com sucesso! Use a nova password no próximo login.", "ok");
     } catch (e) {
       showToast(e.response?.data?.error || "Erro ao alterar password.", "err");
     } finally {
@@ -181,6 +194,48 @@ export default function Settings({ user, fullName, onFullNameChange }) {
           {savingPw ? "A guardar…" : "Alterar Password"}
         </button>
       </Section>
+
+      {/* Modal de Confirmação */}
+      {confirmModal && (
+        <div style={{
+          position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999,
+          background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{
+            background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16,
+            padding: "28px", maxWidth: 400, boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+          }}>
+            <h2 style={{ margin: "0 0 12px 0", color: "var(--text)", fontSize: "1.1rem", fontWeight: 700 }}>
+              {confirmModal.title}
+            </h2>
+            <p style={{ margin: "0 0 24px 0", color: MUTE, fontSize: "0.9rem" }}>
+              {confirmModal.message}
+            </p>
+            <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+              <button
+                onClick={confirmModal.onCancel}
+                style={{
+                  background: "var(--bg)", color: "var(--text)", border: "1px solid var(--border)",
+                  borderRadius: 8, padding: "9px 18px", fontSize: "0.84rem", fontWeight: 600, cursor: "pointer",
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmModal.onConfirm}
+                disabled={savingPw}
+                style={{
+                  background: "#ef4444", color: "#fff", border: "none",
+                  borderRadius: 8, padding: "9px 18px", fontSize: "0.84rem", fontWeight: 600, cursor: "pointer",
+                  opacity: savingPw ? 0.5 : 1,
+                }}
+              >
+                {savingPw ? "A guardar…" : "Confirmar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && <Toast msg={toast.msg} type={toast.type} />}
     </div>
