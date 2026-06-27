@@ -229,9 +229,14 @@ const XTB_ACCOUNT_CURRENCY = {
 };
 
 // ── Parser XTB (.xlsx) ────────────────────────────────────
-async function parseXTB(buffer) {
+async function parseXTB(buffer, filename = "") {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer);
+
+  // Moeda da conta a partir do PREFIXO do nome do ficheiro (ex: "EUR_1682079_...",
+  // "USD_52663818_..."). É a forma fiável de deteção automática — o conteúdo do ficheiro
+  // não traz a moeda. Fallback: mapa por nº de conta (XTB_ACCOUNT_CURRENCY) e, por fim, EUR.
+  const fnameCurrency = (String(filename).match(/^([A-Z]{3})[_-]/) || [])[1] || null;
 
   // ── Número de conta (cabeçalho do relatório: "Account number" / "Account") ──
   let accountNumber = null;
@@ -248,7 +253,7 @@ async function parseXTB(buffer) {
 
   // Moeda da conta (override por nº de conta; default EUR). Para contas não-EUR
   // os valores vêm na moeda da conta e são convertidos para EUR no fim da função.
-  const accountCurrency = (XTB_ACCOUNT_CURRENCY[accountNumber] || "EUR").toUpperCase();
+  const accountCurrency = (fnameCurrency || XTB_ACCOUNT_CURRENCY[accountNumber] || "EUR").toUpperCase();
 
   // ── Aba de operações fechadas ──
   let sheet = null, headerRowNum = 1;
@@ -344,6 +349,9 @@ async function parseXTB(buffer) {
       gross_pl:         grossPL,
       valor_compra_eur: iPurchase >= 0 ? purchaseVal : null,
       valor_venda_eur:  iSale     >= 0 ? saleVal     : null,
+      pl_orig:          pl,        // moeda nativa da conta (igual à corretora)
+      valor_compra_orig: iPurchase >= 0 ? purchaseVal : null,
+      valor_venda_orig:  iSale     >= 0 ? saleVal     : null,
       preco_abertura:   iOpenPrice  >= 0 ? toFloat(get(iOpenPrice))  || null : null,
       preco_fecho:      iClosePrice >= 0 ? toFloat(get(iClosePrice)) || null : null,
       sl:               iSL     >= 0 ? toFloat(get(iSL))     || null : null,
@@ -566,6 +574,7 @@ async function parseIBKR(buffer) {
   // alpha-2) — fonte mais fiável de país.
   const ISIN_RE = /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/;
   const isinBySymbol = new Map(); // symbol → prefixo ISO 2 letras (ex: "DE")
+  const fullIsinBySymbol = new Map(); // symbol → ISIN completo (ex: "US00724F1012")
   const nameBySymbol = new Map(); // symbol → nome do instrumento (Description)
   let fiiHeaders = null;
   // Número e nome de conta — secção "Account Information" (Field Name "Account"/"Name")
@@ -588,7 +597,10 @@ async function parseIBKR(buffer) {
       const g    = key => { const i = fiiHeaders.indexOf(key); return i >= 0 ? cols[i] : null; };
       const sym  = (g("Symbol") || "").replace(/\s/g, "").toUpperCase();
       const isin = (g("Security ID") || g("ISIN") || "").trim().toUpperCase();
-      if (sym && ISIN_RE.test(isin)) isinBySymbol.set(sym, isin.slice(0, 2));
+      if (sym && ISIN_RE.test(isin)) {
+        isinBySymbol.set(sym, isin.slice(0, 2));
+        fullIsinBySymbol.set(sym, isin);
+      }
       const desc = (g("Description") || "").trim();
       if (sym && desc) nameBySymbol.set(sym, desc);
     }
@@ -636,6 +648,7 @@ async function parseIBKR(buffer) {
         nome:         nameBySymbol.get(sym) || null,
         categoria,
         moeda:        currency,
+        pais:         isinBySymbol.get(sym) || null,                 // ISO 2 letras (do ISIN) p/ mapear bolsa
         quantidade:   qty,
         preco_medio:  costPrice || (qty ? costBasis / qty : null),  // por ação (moeda nativa)
         preco_atual:  closePrice,                                    // por ação (moeda nativa)
@@ -687,6 +700,9 @@ async function parseIBKR(buffer) {
         gross_pl:         pl + fees,
         valor_compra_eur: basis,
         valor_venda_eur:  proceeds,
+        pl_orig:          pl,        // moeda nativa (igual à corretora) — antes da conversão
+        valor_compra_orig: basis,
+        valor_venda_orig:  proceeds,
         preco_abertura:   null,
         preco_fecho:      tPrice,
         sl:               null,
@@ -706,6 +722,7 @@ async function parseIBKR(buffer) {
         conta_nome:       accountName,
         tipo_ordem:       rawQty >= 0 ? "BUY" : "SELL",
         pais,
+        isin:             fullIsinBySymbol.get(sym) || null,
         ref_externa:      `${sym}|${dt}|${qty}`,
       });
       if (currency !== "EUR" && pl !== 0) needsConv.push(idx);
@@ -742,6 +759,7 @@ async function parseIBKR(buffer) {
         nome_instrumento: desc || null,
         produto:         null,
         ref_externa:     txId,
+        isin:            isinMatch ? isinMatch[1].toUpperCase() : (fullIsinBySymbol.get(sym) || null),
         movimentos:      JSON.stringify([{ id: txId, tipo: "Dividend", valor: amount, data: divDate }]),
         tipo:            "DIVIDEND",
         _currency:       currency, // auxiliar para conversão
@@ -920,17 +938,18 @@ function saveData(username, trades, dividends, deposits = [], holdings = []) {
     INSERT OR IGNORE INTO trades
       (simbolo, data_abertura, data_fecho, pl_eur, volume, fees,
        valor_compra_eur, valor_venda_eur, moeda_original, categoria,
-       corretora, conta, conta_nome, tipo_ordem, pais, ref_externa,
+       corretora, conta, conta_nome, tipo_ordem, pais, isin, ref_externa,
        swap, rollover, gross_pl, taxa_cambio,
        preco_abertura, preco_fecho, sl, tp, margin, comment,
-       nome_instrumento, produto, origem, conversao_abertura, conversao_fecho)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+       nome_instrumento, produto, origem, conversao_abertura, conversao_fecho,
+       pl_orig, valor_compra_orig, valor_venda_orig)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 
   const insDiv = db.prepare(`
     INSERT OR IGNORE INTO dividendos
       (simbolo, data_pagamento, valor_bruto_eur, retencao_eur, valor_liq_eur, pais_fonte,
-       moeda, corretora, conta, conta_nome, ref_externa, nome_instrumento, produto, movimentos, tipo)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+       moeda, corretora, conta, conta_nome, ref_externa, nome_instrumento, produto, movimentos, tipo, isin)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
 
   const updDivPais = db.prepare(
     `UPDATE dividendos SET pais_fonte = ? WHERE simbolo = ? AND data_pagamento = ? AND corretora = ? AND pais_fonte IS NULL`);
@@ -950,13 +969,14 @@ function saveData(username, trades, dividends, deposits = [], holdings = []) {
         t.volume   ?? null, t.fees        ?? null,
         t.valor_compra_eur ?? null, t.valor_venda_eur ?? null,
         t.moeda_original   ?? null, t.categoria, t.corretora, t.conta ?? null, t.conta_nome ?? null,
-        t.tipo_ordem ?? null, t.pais ?? null, t.ref_externa ?? null,
+        t.tipo_ordem ?? null, t.pais ?? null, t.isin ?? null, t.ref_externa ?? null,
         t.swap       ?? null, t.rollover    ?? null,
         t.gross_pl   ?? null, t.taxa_cambio ?? null,
         t.preco_abertura ?? null, t.preco_fecho ?? null,
         t.sl ?? null, t.tp ?? null, t.margin ?? null, t.comment ?? null,
         t.nome_instrumento ?? null, t.produto ?? null, t.origem ?? null,
-        t.conversao_abertura ?? null, t.conversao_fecho ?? null
+        t.conversao_abertura ?? null, t.conversao_fecho ?? null,
+        t.pl_orig ?? null, t.valor_compra_orig ?? null, t.valor_venda_orig ?? null
       );
       insertedTrades += r.changes;
     }
@@ -966,7 +986,7 @@ function saveData(username, trades, dividends, deposits = [], holdings = []) {
         d.retencao_eur, d.valor_liq_eur,
         d.pais_fonte ?? null, d.moeda ?? null, d.corretora, d.conta ?? null, d.conta_nome ?? null,
         d.ref_externa ?? null, d.nome_instrumento ?? null, d.produto ?? null, d.movimentos ?? null,
-        d.tipo ?? "DIVIDEND"
+        d.tipo ?? "DIVIDEND", d.isin ?? null
       );
       insertedDivs += r.changes;
       if (r.changes === 0 && d.pais_fonte) {
@@ -989,16 +1009,16 @@ function saveData(username, trades, dividends, deposits = [], holdings = []) {
       const delPos = db.prepare(
         `DELETE FROM posicoes WHERE corretora = ? AND (conta = ? OR (conta IS NULL AND ? IS NULL))`);
       const insPos = db.prepare(`INSERT INTO posicoes
-        (simbolo, nome, categoria, moeda, quantidade, preco_medio, custo_eur,
+        (simbolo, nome, categoria, moeda, pais, quantidade, preco_medio, custo_eur,
          preco_atual, valor_eur, pl_eur, corretora, conta, conta_nome, atualizado_em)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
       const now = new Date().toISOString();
       const cleared = new Set();
       for (const h of holdings) {
         const key = `${h.corretora}|${h.conta ?? ""}`;
         if (!cleared.has(key)) { delPos.run(h.corretora, h.conta ?? null, h.conta ?? null); cleared.add(key); }
         insPos.run(
-          h.simbolo, h.nome ?? null, h.categoria ?? null, h.moeda ?? null,
+          h.simbolo, h.nome ?? null, h.categoria ?? null, h.moeda ?? null, h.pais ?? null,
           h.quantidade ?? null, h.preco_medio ?? null, h.custo_eur ?? null,
           h.preco_atual ?? null, h.valor_eur ?? null, h.pl_eur ?? null,
           h.corretora, h.conta ?? null, h.conta_nome ?? null, now
@@ -1030,7 +1050,7 @@ router.post("/preview", upload.single("file"), async (req, res) => {
     await fx.ensureFresh();   // garante câmbios frescos antes de converter (no-op se já atualizados)
     let trades = [], dividends = [], deposits = [], convFailed = [], holdings = [];
     if (tipo === "xtb") {
-      ({ trades, dividends, deposits, convFailed = [], holdings = [] } = await parseXTB(req.file.buffer));
+      ({ trades, dividends, deposits, convFailed = [], holdings = [] } = await parseXTB(req.file.buffer, req.file.originalname));
     } else if (tipo === "ibkr") {
       ({ trades, dividends, deposits, convFailed = [], holdings = [] } = await parseIBKR(req.file.buffer));
     } else {
@@ -1061,7 +1081,7 @@ router.post("/confirm", upload.single("file"), async (req, res) => {
     await fx.ensureFresh();   // garante câmbios frescos antes de converter (no-op se já atualizados)
     let trades = [], dividends = [], deposits = [], convFailed = [], holdings = [];
     if (tipo === "xtb") {
-      ({ trades, dividends, deposits, convFailed = [], holdings = [] } = await parseXTB(req.file.buffer));
+      ({ trades, dividends, deposits, convFailed = [], holdings = [] } = await parseXTB(req.file.buffer, req.file.originalname));
     } else if (tipo === "ibkr") {
       ({ trades, dividends, deposits, convFailed = [], holdings = [] } = await parseIBKR(req.file.buffer));
     } else {

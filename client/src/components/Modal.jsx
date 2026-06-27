@@ -6,7 +6,7 @@ const fmtVal = v =>
   (v < 0 ? "-" : "") + "€ " +
   Math.abs(v).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-export default function Modal({ title, onClose, summary, brokers, children }) {
+export default function Modal({ title, header, onClose, summary, brokers, children }) {
   useEffect(() => {
     const handler = e => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", handler);
@@ -17,10 +17,14 @@ export default function Modal({ title, onClose, summary, brokers, children }) {
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal">
         <div className="modal-header">
-          <div>
-            <div className="modal-title">{title}</div>
-          </div>
-          {brokers && brokers.length > 0 && (() => {
+          {header ? (
+            <div style={{ flex: 1, minWidth: 0, marginRight: 12 }}>{header}</div>
+          ) : (
+            <div>
+              <div className="modal-title">{title}</div>
+            </div>
+          )}
+          {!header && brokers && brokers.length > 0 && (() => {
             const total = brokers.length > 1 ? brokers.reduce((s, [, st]) => s + st.pl, 0) : null;
             return (
               <div style={{ marginLeft: "auto", marginRight: 16, display: "flex", gap: 8, alignItems: "flex-start" }}>

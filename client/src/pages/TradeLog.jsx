@@ -1,9 +1,12 @@
 import { useState, useEffect, useMemo } from "react";
 import axios from "axios";
+import Modal from "../components/Modal.jsx";
 
-const fmt = v => (v >= 0 ? "+" : "") + "€ " + Math.abs(v).toLocaleString("de-DE", { minimumFractionDigits: 2 });
-const fmtE = v => "€ " + Math.abs(v).toLocaleString("de-DE", { minimumFractionDigits: 2 });
+const DEC = { minimumFractionDigits: 2, maximumFractionDigits: 2 };  // sempre 2 casas decimais
+const fmt = v => (v >= 0 ? "+" : "") + "€ " + Math.abs(v).toLocaleString("de-DE", DEC);
+const fmtE = v => "€ " + Math.abs(v).toLocaleString("de-DE", DEC);
 const GREEN = "#10b981", RED = "#f43f5e", BLUE = "#4f6af5", MUTE = "#4e6080";
+const LGRAY = "#9ca3af";  // cinza claro (títulos, valores originais, país, data)
 const TEAL = "#14b8a6", VIOLET = "#a78bfa", AMBER = "#f59e0b";
 
 // Badge de resultado — cor distinta e intuitiva por tipo de movimento
@@ -18,8 +21,26 @@ function ResultBadge({ label, color }) {
 }
 
 const fmtN  = (v, dec = 2) => v != null && v !== 0 ? Number(v).toFixed(dec) : "—";
-const fmtEu = v => v != null && v !== 0 ? `€ ${Math.abs(Number(v)).toLocaleString("de-DE", { minimumFractionDigits: 2 })}` : "—";
+const fmtEu = v => v != null && v !== 0 ? `€ ${Math.abs(Number(v)).toLocaleString("de-DE", DEC)}` : "—";
 const fmtDT = v => v ? String(v).slice(0, 19).replace("T", " ") : "—";
+
+// Valores na moeda original do ativo (igual à corretora), com sinal e 2 casas decimais.
+const CUR_SYMBOL = { USD:"US$ ", EUR:"€ ", GBP:"£ ", CHF:"CHF ", CAD:"C$ ", JPY:"¥ ", AUD:"A$ " };
+const curSym = m => CUR_SYMBOL[m] || (m ? m+" " : "");
+const isEur  = m => !m || m === "EUR";
+const fmtEsign = v => v == null ? "—" : (v<0?"-":"")+"€ "+Math.abs(Number(v)).toLocaleString("de-DE", DEC);
+const fmtNatSign = (v, m) => v == null ? "—" : (v<0?"-":"")+curSym(m)+Math.abs(Number(v)).toLocaleString("de-DE", DEC);
+// Valor original (moeda da corretora) reconstruído a partir da taxa de câmbio guardada.
+const toOrig = (eur, t) => (eur == null || !t.taxa_cambio || t.taxa_cambio === 1) ? eur : eur / t.taxa_cambio;
+// "$ orig / € convertido" — só mostra o par quando a moeda ≠ EUR; senão só €.
+// Original sempre a NEGRITO; aqui o original fica cinza e o € na cor do texto.
+const pairVal = (eur, t) => eur == null ? "—"
+  : isEur(t.moeda_original) ? fmtEsign(eur)
+  : <><span style={{ fontWeight: 700, color: LGRAY }}>{fmtNatSign(toOrig(eur, t), t.moeda_original)}</span> <span style={{ color: "var(--text)", fontWeight: 700 }}>/ {fmtEsign(eur)}</span></>;
+// Net P/L: original + € na MESMA cor (verde/vermelho, herdada do Field), original a negrito.
+const pairPL = (eur, t) => eur == null ? "—"
+  : isEur(t.moeda_original) ? fmtEsign(eur)
+  : <><span style={{ fontWeight: 700 }}>{fmtNatSign(toOrig(eur, t), t.moeda_original)}</span> / {fmtEsign(eur)}</>;
 const parseMovs = d => { try { return JSON.parse(d.movimentos || "[]"); } catch { return []; } };
 
 // ── Pré-filtros de período ──────────────────────────────────────
@@ -54,8 +75,44 @@ function presetRange(preset) {
 }
 
 // Colunas do registo (mantêm o alinhamento entre todas as linhas)
-const LOG_COLS = "110px minmax(130px,1.6fr) 80px 92px 84px 78px 96px 112px 104px 22px";
-const LOG_MINW = 960;
+// Colunas: Empresa(+ticker) · Corretora(+conta) · País · Categoria · Valor · Swap · Resultado · Data · seta
+// Colunas: Data · Empresa(+ticker) · Corretora(+conta) · País · Categoria · Valor · Swap · Resultado · seta
+const LOG_COLS = "0.95fr 1.7fr 1.1fr 0.8fr 1fr 1.2fr 1.1fr 0.95fr 24px";
+const LOG_MINW = 1090;
+
+// Descrição curta para a coluna Empresa (a descrição completa fica no modal).
+const shortDesc = (txt) => {
+  const s = (txt || "").toLowerCase();
+  if (s.includes("ewallet"))  return "eWallet";
+  if (s.includes("paypal"))   return "PayPal";
+  return txt || "—";
+};
+
+// Célula de valor: original (moeda da corretora, cinza e a negrito) por cima e convertido
+// (€, a negrito, verde/vermelho) por baixo. Trades em EUR mostram só o € a negrito.
+function ColOC({ eur, t, win }) {
+  if (eur == null) return <span className="log-cell" style={{ textAlign: "right", color: MUTE }}>—</span>;
+  const cor = win == null ? (eur >= 0 ? GREEN : RED) : (win ? GREEN : RED);
+  if (isEur(t?.moeda_original) || !t?.taxa_cambio || t.taxa_cambio === 1) {
+    return <span className="log-cell" style={{ textAlign: "right", fontWeight: 700, color: cor }}>{fmtEsign(eur)}</span>;
+  }
+  return (
+    <span className="log-cell" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", lineHeight: 1.22, minWidth: 0 }}>
+      <span style={{ fontWeight: 700, color: cor, whiteSpace: "nowrap" }}>{fmtEsign(eur)}</span>
+      <span style={{ fontSize: "0.72rem", fontWeight: 700, color: LGRAY, whiteSpace: "nowrap" }}>{fmtNatSign(toOrig(eur, t), t.moeda_original)}</span>
+    </span>
+  );
+}
+
+// Célula "Corretora + conta" (substitui o ID, que fica feio quando agrega vários).
+function ColBroker({ corretora, conta }) {
+  return (
+    <span className="log-cell" style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", lineHeight: 1.25, minWidth: 0 }}>
+      <span style={{ color: "var(--text)", fontWeight: 600, whiteSpace: "nowrap" }}>{corretora || "—"}</span>
+      <span style={{ fontSize: "0.66rem", color: LGRAY, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>{conta || "—"}</span>
+    </span>
+  );
+}
 
 // Botão de pré-filtro — segue o estilo "Ver Movimentos" com animação
 function PresetBtn({ active, onClick, children, disabled }) {
@@ -78,7 +135,7 @@ function PresetBtn({ active, onClick, children, disabled }) {
 function Field({ label, value, color }) {
   return (
     <div>
-      <div style={{ color: MUTE, textTransform: "uppercase", fontSize: 9.5, letterSpacing: ".07em", marginBottom: 3 }}>
+      <div style={{ color: LGRAY, textTransform: "uppercase", fontSize: 9.5, letterSpacing: ".07em", marginBottom: 3 }}>
         {label}
       </div>
       <div style={{ color: color || "var(--text)", fontWeight: color ? 700 : 400, fontSize: 12.5 }}>
@@ -118,6 +175,7 @@ function TradeDetail({ t }) {
       <Section title="Identificação">
         <Field label="Posição / Ref"   value={t.ref_externa} />
         <Field label="Símbolo"         value={t.simbolo} />
+        <Field label="ISIN"            value={t.isin} />
         <Field label="Instrumento"     value={t.nome_instrumento} />
         <Field label="Tipo de Ordem"   value={t.tipo_ordem} />
         <Field label="Categoria"       value={t.categoria} />
@@ -149,12 +207,12 @@ function TradeDetail({ t }) {
 
       {/* ── Valores de Negociação ── */}
       <Section title="Valores de Negociação">
-        <Field label="Purchase Value"  value={fmtEu(t.valor_compra_eur)} />
-        <Field label="Sale Value"      value={fmtEu(t.valor_venda_eur)} />
-        <Field label="Comissão"        value={fmtEu(t.fees)} />
-        {hasSwap && <Field label="Swap"     value={fmtEu(t.swap)} />}
-        {hasSwap && <Field label="Rollover" value={fmtEu(t.rollover)} />}
-        {hasSwap && <Field label="Gross P/L" value={fmtEu(t.gross_pl)} />}
+        <Field label="Purchase Value"  value={pairVal(t.valor_compra_eur, t)} />
+        <Field label="Sale Value"      value={pairVal(t.valor_venda_eur,  t)} />
+        <Field label="Comissão"        value={pairVal(t.fees, t)} />
+        {hasSwap && <Field label="Swap"     value={pairVal(t.swap, t)} />}
+        {hasSwap && <Field label="Rollover" value={pairVal(t.rollover, t)} />}
+        {hasSwap && <Field label="Gross P/L" value={pairVal(t.gross_pl, t)} />}
         {t.conversao_abertura && <Field label="Taxa Conv. Abertura" value={fmtN(t.conversao_abertura, 4)} />}
         {t.conversao_fecho    && <Field label="Taxa Conv. Fecho"    value={fmtN(t.conversao_fecho, 4)} />}
       </Section>
@@ -164,13 +222,13 @@ function TradeDetail({ t }) {
         <Section title="Gestão de Risco">
           <Field label="Stop Loss (SL)"  value={fmtN(t.sl, 5)} />
           <Field label="Take Profit (TP)" value={fmtN(t.tp, 5)} />
-          <Field label="Margem"          value={fmtEu(t.margin)} />
+          <Field label="Margem"          value={pairVal(t.margin, t)} />
         </Section>
       )}
 
       {/* ── Resultado ── */}
       <Section title="Resultado">
-        <Field label="Net P/L" value={fmt(t.pl_eur)} color={t.pl_eur >= 0 ? GREEN : RED} />
+        <Field label="Net P/L" value={pairPL(t.pl_eur, t)} color={t.pl_eur >= 0 ? GREEN : RED} />
       </Section>
 
       {/* ── Comentário ── */}
@@ -347,10 +405,9 @@ export default function TradeLog() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo]     = useState("");
   const [showCal, setShowCal]       = useState(false);
-  const [expanded, setExpanded]     = useState(null);
+  const [modalRow, setModalRow]     = useState(null); // operação aberta em modal
+  const [selectedKey, setSelKey]    = useState(null); // linha clicada (fica delineada ao voltar)
   const [loading, setLoading]       = useState(true);
-  const [page, setPage]             = useState(0);
-  const [pageSize, setPageSize]     = useState(50);   // 0 = mostrar todos
 
   useEffect(() => {
     setLoading(true);
@@ -386,7 +443,15 @@ export default function TradeLog() {
     let data = allTrades.filter(t => inRange(t.data_fecho));
     if (categoria) data = data.filter(t => t.categoria === categoria);
     if (corretora) data = data.filter(t => t.corretora === corretora);
-    if (simbolo)   data = data.filter(t => t.simbolo?.toLowerCase().includes(simbolo.toLowerCase()));
+    if (simbolo) {
+      const q = simbolo.toLowerCase();
+      data = data.filter(t =>
+        t.simbolo?.toLowerCase().includes(q) ||
+        String(t.ref_externa ?? "").toLowerCase().includes(q) ||
+        t.isin?.toLowerCase().includes(q) ||
+        t.nome_instrumento?.toLowerCase().includes(q)
+      );
+    }
     if (resultado === "win")  data = data.filter(t => t.pl_eur > 0);
     if (resultado === "loss") data = data.filter(t => t.pl_eur < 0);
     return data;
@@ -400,17 +465,31 @@ export default function TradeLog() {
     if (categoria === "DIVIDENDO") data = data.filter(d => d.tipo !== "INTEREST");
     if (categoria === "JUROS")     data = data.filter(d => d.tipo === "INTEREST");
     if (corretora) data = data.filter(d => (d.corretora ?? "IBKR") === corretora);
-    if (simbolo)   data = data.filter(d => d.simbolo?.toLowerCase().includes(simbolo.toLowerCase()));
+    if (simbolo) {
+      const q = simbolo.toLowerCase();
+      data = data.filter(d =>
+        d.simbolo?.toLowerCase().includes(q) ||
+        String(d.ref_externa ?? "").toLowerCase().includes(q) ||
+        d.isin?.toLowerCase().includes(q) ||
+        d.nome_instrumento?.toLowerCase().includes(q)
+      );
+    }
     return data;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allDivs, categoria, corretora, simbolo, resultado, range.from, range.to]);
 
   const deps = useMemo(() => {
     if (resultado === "win" || resultado === "loss") return [];
-    if (simbolo) return [];                                   // depósitos não têm símbolo
     if (categoria && categoria !== "MOVIMENTO") return [];
     let data = allDeps.filter(d => inRange(d.data));
     if (corretora) data = data.filter(d => d.corretora === corretora);
+    if (simbolo) {                                            // depósitos não têm símbolo → procura por ID/descrição
+      const q = simbolo.toLowerCase();
+      data = data.filter(d =>
+        String(d.ref_externa ?? "").toLowerCase().includes(q) ||
+        d.descricao?.toLowerCase().includes(q)
+      );
+    }
     return data;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allDeps, categoria, corretora, simbolo, resultado, range.from, range.to]);
@@ -426,15 +505,32 @@ export default function TradeLog() {
   const divTotal   = divs.reduce((s, d) => s + (d.valor_liq_eur ?? 0), 0);
   const total      = tradeTotal + divTotal;     // depósitos/levantamentos não entram no P&L
 
-  // Volta à 1ª página sempre que os filtros ou o tamanho de página mudam
-  useEffect(() => { setPage(0); setExpanded(null); }, [categoria, resultado, simbolo, corretora, preset, customFrom, customTo, pageSize]);
+  // Efeito do câmbio (B): diferença entre o valor convertido em € e o valor bruto (moeda
+  // original) das operações em moeda ≠ EUR. Positivo = o € ficou acima do valor bruto.
+  const fxTrades = trades.filter(t => t.taxa_cambio && t.taxa_cambio !== 1);
+  const fxEur    = fxTrades.reduce((s, t) => s + (t.pl_eur ?? 0), 0);
+  const fxRaw    = fxTrades.reduce((s, t) => s + (t.pl_eur ?? 0) / t.taxa_cambio, 0);
+  const fxDelta  = fxEur - fxRaw;
+  const fxPct    = fxRaw ? (fxDelta / Math.abs(fxRaw)) * 100 : 0;
 
-  // Paginação do lado do cliente (pageSize 0 = todos) — evita renderizar milhares de linhas de uma vez
-  const totalPages = pageSize === 0 ? 1 : Math.max(1, Math.ceil(rows.length / pageSize));
-  const curPage    = Math.min(page, totalPages - 1);
-  const start      = pageSize === 0 ? 0 : curPage * pageSize;
-  const end        = pageSize === 0 ? rows.length : Math.min(start + pageSize, rows.length);
-  const pagedRows  = pageSize === 0 ? rows : rows.slice(start, end);
+  // Limpa a seleção quando os filtros mudam.
+  useEffect(() => { setModalRow(null); setSelKey(null); }, [categoria, resultado, simbolo, corretora, preset, customFrom, customTo]);
+
+  // Sem paginação: a lista mostra todas as linhas (página livre até ao fim).
+  const pagedRows = rows;
+
+  // Chave única por linha (para abrir o modal e delinear a linha clicada ao voltar).
+  const keyOf = row => row._type === "trade" ? `t-${row.id}`
+    : row._type === "dep" ? `p-${row.id}` : `d-${row.simbolo}-${row.data_pagamento}`;
+  const openRow  = row => { setSelKey(keyOf(row)); setModalRow(row); };
+  const closeRow = () => {
+    const k = selectedKey;
+    setModalRow(null);
+    requestAnimationFrame(() => {
+      const el = k && document.querySelector(`[data-row-key="${(window.CSS?.escape ? CSS.escape(k) : k)}"]`);
+      if (el) el.scrollIntoView({ block: "center" });
+    });
+  };
 
   return (
     <div style={{ height: "calc(100vh - 56px - var(--topbar-h))", display: "flex", flexDirection: "column" }}>
@@ -454,6 +550,14 @@ export default function TradeLog() {
             <div style={{ fontSize: "1.4rem", fontWeight: 700, color: total >= 0 ? GREEN : RED }}>
               {fmt(total)}
             </div>
+            {fxTrades.length > 0 && (
+              <div style={{ fontSize: "0.68rem", marginTop: 2 }}>
+                <span style={{ color: MUTE }}>efeito do câmbio </span>
+                <span style={{ color: fxDelta >= 0 ? GREEN : RED, fontWeight: 700 }}>
+                  ({fmt(fxDelta)} · {(fxPct >= 0 ? "+" : "") + fxPct.toFixed(2)}%)
+                </span>
+              </div>
+            )}
             <div style={{ fontSize: "0.7rem", color: MUTE, marginTop: 2 }}>
               P&L {divs.length > 0 ? "+ dividendos" : "filtrado"}
             </div>
@@ -514,7 +618,7 @@ export default function TradeLog() {
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
           </svg>
           <input
-            placeholder="Símbolo..."
+            placeholder="Símbolo, ISIN, ID..."
             value={simbolo}
             onChange={e => setSim(e.target.value)}
             style={{
@@ -550,6 +654,18 @@ export default function TradeLog() {
       ) : (
       <div style={{ overflowX: "auto" }}>
        <div style={{ minWidth: LOG_MINW }}>
+        {/* Cabeçalho de colunas */}
+        <div className="log-head" style={{ gridTemplateColumns: LOG_COLS, color: LGRAY }}>
+          <span className="log-cell" style={{ textAlign: "center" }}>Data</span>
+          <span className="log-cell">Empresa</span>
+          <span className="log-cell" style={{ textAlign: "center" }}>Corretora</span>
+          <span className="log-cell" style={{ textAlign: "center" }}>País</span>
+          <span className="log-cell" style={{ textAlign: "center" }}>Categoria</span>
+          <span className="log-cell" style={{ textAlign: "right" }}>Valor</span>
+          <span className="log-cell" style={{ textAlign: "right" }}>Swap</span>
+          <span className="log-cell" style={{ textAlign: "center" }}>Resultado</span>
+          <span />
+        </div>
         {pagedRows.map(row => {
         if (row._type === "trade") {
           const t = row;
@@ -557,21 +673,28 @@ export default function TradeLog() {
           const win = (t.pl_eur ?? 0) >= 0;
           return (
             <div key={key}>
-              <div className="log-row" style={{ gridTemplateColumns: LOG_COLS }} onClick={() => setExpanded(expanded === key ? null : key)}>
-                <span className="log-cell" style={{ fontFamily: "monospace", fontSize: 11, color: MUTE }} title={t.ref_externa}>{t.ref_externa || "—"}</span>
-                <span className="log-cell" style={{ color: "var(--text)" }} title={t.nome_instrumento}>{t.nome_instrumento || "—"}</span>
-                <span className="log-cell" style={{ fontWeight: 700, color: "var(--text)" }}>{t.simbolo}</span>
-                <span><ResultBadge label={win ? "Ganho" : "Perda"} color={win ? GREEN : RED} /></span>
-                <span className="log-cell" style={{ color: t.categoria === "CFD" ? RED : MUTE, fontWeight: t.categoria === "CFD" ? 700 : 400 }}>{t.categoria}</span>
-                <span className="log-cell" style={{ color: MUTE }}>{t.corretora}</span>
-                <span className="log-cell" style={{ color: MUTE }}>{t.pais || "—"}</span>
-                <span className="log-cell" style={{ textAlign: "right", fontWeight: 700, color: win ? GREEN : RED }}>{fmt(t.pl_eur)}</span>
-                <span className="log-cell" style={{ color: MUTE, fontSize: "0.75rem" }}>{t.data_fecho?.slice(0, 10)}</span>
-                <span style={{ color: MUTE, textAlign: "center" }}>{expanded === key ? "▲" : "▼"}</span>
+              <div className="log-row" data-row-key={key} style={{ gridTemplateColumns: LOG_COLS, outline: selectedKey === key ? "2px solid var(--accent)" : "none", outlineOffset: -2 }} onClick={() => openRow(row)}>
+                {/* Data */}
+                <span className="log-cell" style={{ color: LGRAY, fontSize: "0.75rem", textAlign: "center" }}>{t.data_fecho?.slice(0, 10)}</span>
+                {/* Empresa + TICKER */}
+                <span className="log-cell" style={{ display: "flex", flexDirection: "column", lineHeight: 1.25, minWidth: 0 }}>
+                  <span style={{ color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.nome_instrumento}>{t.nome_instrumento || "—"}</span>
+                  <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#fbbf24" }}>{t.simbolo}</span>
+                </span>
+                {/* Corretora + conta */}
+                <ColBroker corretora={t.corretora} conta={t.conta} />
+                {/* País */}
+                <span className="log-cell" style={{ color: LGRAY, textAlign: "center" }}>{t.pais || "—"}</span>
+                {/* Categoria */}
+                <span className="log-cell" style={{ color: t.categoria === "CFD" ? RED : MUTE, fontWeight: t.categoria === "CFD" ? 700 : 400, textAlign: "center" }}>{t.categoria}</span>
+                {/* Valor */}
+                <ColOC eur={t.pl_eur} t={t} win={win} />
+                {/* Swap */}
+                <ColOC eur={t.swap} t={t} />
+                {/* Resultado */}
+                <span style={{ textAlign: "center" }}><ResultBadge label={win ? "Ganho" : "Perda"} color={win ? GREEN : RED} /></span>
+                <span style={{ color: MUTE, textAlign: "center" }}>›</span>
               </div>
-              {expanded === key && (
-                <TradeDetail t={t} />
-              )}
             </div>
           );
         }
@@ -583,39 +706,25 @@ export default function TradeLog() {
           const val = isDep ? d.valor : -d.valor;
           return (
             <div key={key}>
-              <div className="log-row" style={{ gridTemplateColumns: LOG_COLS }} onClick={() => setExpanded(expanded === key ? null : key)}>
-                <span className="log-cell" style={{ fontFamily: "monospace", fontSize: 11, color: MUTE }} title={d.ref_externa}>{d.ref_externa || "—"}</span>
-                <span className="log-cell" style={{ color: "var(--text)" }} title={d.descricao}>{d.descricao || d.nome_instrumento || "—"}</span>
-                <span className="log-cell" style={{ color: MUTE }}>—</span>
-                <span><ResultBadge label={isDep ? "Depósito" : "Levantamento"} color={isDep ? VIOLET : AMBER} /></span>
-                <span className="log-cell" style={{ color: MUTE }}>Movimento</span>
-                <span className="log-cell" style={{ color: MUTE }}>{d.corretora}</span>
-                <span className="log-cell" style={{ color: MUTE }}>—</span>
-                <span className="log-cell" style={{ textAlign: "right", fontWeight: 700, color: isDep ? GREEN : RED }}>{fmt(val)}</span>
-                <span className="log-cell" style={{ color: MUTE, fontSize: "0.75rem" }}>{d.data?.slice(0, 10)}</span>
-                <span style={{ color: MUTE, textAlign: "center" }}>{expanded === key ? "▲" : "▼"}</span>
+              <div className="log-row" data-row-key={key} style={{ gridTemplateColumns: LOG_COLS, outline: selectedKey === key ? "2px solid var(--accent)" : "none", outlineOffset: -2 }} onClick={() => openRow(row)}>
+                {/* Data */}
+                <span className="log-cell" style={{ color: LGRAY, fontSize: "0.75rem", textAlign: "center" }}>{d.data?.slice(0, 10)}</span>
+                {/* Empresa (descrição curta) */}
+                <span className="log-cell" style={{ color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={d.descricao}>{shortDesc(d.descricao || d.nome_instrumento)}</span>
+                {/* Corretora + conta */}
+                <ColBroker corretora={d.corretora} conta={d.conta} />
+                {/* País */}
+                <span className="log-cell" style={{ color: LGRAY, textAlign: "center" }}>—</span>
+                {/* Categoria */}
+                <span className="log-cell" style={{ color: MUTE, textAlign: "center" }}>Movimento</span>
+                {/* Valor */}
+                <ColOC eur={val} t={d} win={isDep} />
+                {/* Swap */}
+                <span className="log-cell" style={{ textAlign: "right", color: MUTE }}>—</span>
+                {/* Resultado */}
+                <span style={{ textAlign: "center" }}><ResultBadge label={isDep ? "Depósito" : "Levantamento"} color={isDep ? VIOLET : AMBER} /></span>
+                <span style={{ color: MUTE, textAlign: "center" }}>›</span>
               </div>
-              {expanded === key && (
-                <div style={{ background:"var(--hover)", border:"1px solid var(--border)", borderTop:"none",
-                              borderRadius:"0 0 8px 8px", padding:"14px 20px", marginBottom:6,
-                              display:"grid", gridTemplateColumns:"repeat(4, minmax(0, 1fr))", gap:"10px 20px", fontSize:12 }}>
-                  {[
-                    ["Data",          d.data?.slice(0, 10)],
-                    ["Tipo",          isDep ? "Depósito" : "Levantamento"],
-                    ["Valor",         fmtE(d.valor)],
-                    ["Corretora",     d.corretora],
-                    ["Conta",         d.conta],
-                    ["Titular Conta", d.conta_nome],
-                    ["ID Operação",   d.ref_externa],
-                    ["Descrição",     d.descricao],
-                  ].map(([k, v]) => (
-                    <div key={k} style={{ minWidth: 0 }}>
-                      <div style={{ color: MUTE, textTransform:"uppercase", fontSize:10, letterSpacing:".06em" }}>{k}</div>
-                      <div style={{ color: "var(--text)", marginTop:2, wordBreak: "break-word" }}>{v ?? "—"}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           );
         }
@@ -626,102 +735,175 @@ export default function TradeLog() {
         const isInt = d.tipo === "INTEREST";
         return (
           <div key={key}>
-            <div className="log-row" style={{ gridTemplateColumns: LOG_COLS }} onClick={() => setExpanded(expanded === key ? null : key)}>
-              <span className="log-cell" style={{ fontFamily: "monospace", fontSize: 11, color: MUTE }} title={d.ref_externa}>{d.ref_externa || "—"}</span>
-              <span className="log-cell" style={{ color: "var(--text)" }} title={d.nome_instrumento}>{d.nome_instrumento || "—"}</span>
-              <span className="log-cell" style={{ fontWeight: 700, color: "var(--text)" }}>{d.simbolo}</span>
-              <span><ResultBadge label={isInt ? "Juros" : "Dividendo"} color={isInt ? TEAL : BLUE} /></span>
-              <span className="log-cell" style={{ color: MUTE }}>{isInt ? "JUROS" : "DIVIDENDO"}</span>
-              <span className="log-cell" style={{ color: MUTE }}>{d.corretora}</span>
-              <span className="log-cell" style={{ color: MUTE }}>{d.pais_fonte || "—"}</span>
-              <span className="log-cell" style={{ textAlign: "right", fontWeight: 700, color: GREEN }}>{fmt(d.valor_liq_eur ?? 0)}</span>
-              <span className="log-cell" style={{ color: MUTE, fontSize: "0.75rem" }}>{d.data_pagamento?.slice(0, 10)}</span>
-              <span style={{ color: MUTE, textAlign: "center" }}>{expanded === key ? "▲" : "▼"}</span>
+            <div className="log-row" data-row-key={key} style={{ gridTemplateColumns: LOG_COLS, outline: selectedKey === key ? "2px solid var(--accent)" : "none", outlineOffset: -2 }} onClick={() => openRow(row)}>
+              {/* Data */}
+              <span className="log-cell" style={{ color: LGRAY, fontSize: "0.75rem", textAlign: "center" }}>{d.data_pagamento?.slice(0, 10)}</span>
+              {/* Empresa + TICKER */}
+              <span className="log-cell" style={{ display: "flex", flexDirection: "column", lineHeight: 1.25, minWidth: 0 }}>
+                <span style={{ color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={d.nome_instrumento}>{d.nome_instrumento || "—"}</span>
+                <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#fbbf24" }}>{d.simbolo}</span>
+              </span>
+              {/* Corretora + conta */}
+              <ColBroker corretora={d.corretora} conta={d.conta} />
+              {/* País */}
+              <span className="log-cell" style={{ color: LGRAY, textAlign: "center" }}>{d.pais_fonte || "—"}</span>
+              {/* Categoria */}
+              <span className="log-cell" style={{ color: MUTE, textAlign: "center" }}>{isInt ? "JUROS" : "DIVIDENDO"}</span>
+              {/* Valor */}
+              <ColOC eur={d.valor_liq_eur ?? 0} t={d} win={true} />
+              {/* Swap */}
+              <span className="log-cell" style={{ textAlign: "right", color: MUTE }}>—</span>
+              {/* Resultado */}
+              <span style={{ textAlign: "center" }}><ResultBadge label={isInt ? "Juros" : "Dividendo"} color={isInt ? TEAL : BLUE} /></span>
+              <span style={{ color: MUTE, textAlign: "center" }}>›</span>
             </div>
-            {expanded === key && (
-              <div style={{ background:"var(--hover)", border:"1px solid var(--border)", borderTop:"none",
-                            borderRadius:"0 0 8px 8px", padding:"14px 20px", marginBottom:6,
-                            display:"grid", gridTemplateColumns:"repeat(4, minmax(0, 1fr))", gap:"10px 20px",
-                            fontSize:12 }}>
-                {[
-                  ["Data Pagamento",  d.data_pagamento?.slice(0, 10)],
-                  ["País Fonte",      d.pais_fonte],
-                  ["Moeda",           d.moeda],
-                  ["Valor Bruto",     d.valor_bruto_eur != null ? fmtE(d.valor_bruto_eur) : "—"],
-                  ["Retenção",        d.retencao_eur    != null ? `-${fmtE(d.retencao_eur)}` : "—"],
-                  ["Valor Líquido",   d.valor_liq_eur   != null ? fmtE(d.valor_liq_eur)   : "—"],
-                  ["Conta",           d.conta],
-                  ["Titular Conta",   d.conta_nome],
-                  ["Instrumento",     d.nome_instrumento],
-                ].map(([k, v]) => (
-                  <div key={k} style={{ minWidth: 0 }}>
-                    <div style={{ color: MUTE, textTransform:"uppercase", fontSize:10, letterSpacing:".06em" }}>{k}</div>
-                    <div style={{ color: "var(--text)", marginTop:2 }}>{v ?? "—"}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-            {expanded === key && (() => {
-              const movs = parseMovs(d);
-              if (!movs.length) return null;
-              return (
-                <div style={{ background:"var(--hover)", border:"1px solid var(--border)", borderTop:"none",
-                              borderRadius:"0 0 8px 8px", padding:"0 20px 14px", marginTop:-6, marginBottom:6 }}>
-                  <div style={{ color: MUTE, textTransform:"uppercase", fontSize:10, letterSpacing:".06em", marginBottom:8 }}>
-                    Registo de Operações ({movs.length})
-                  </div>
-                  <table className="data-table">
-                    <thead><tr>
-                      <th>ID</th><th>Tipo</th><th>Data/Hora</th><th style={{ textAlign:"right" }}>Valor €</th>
-                    </tr></thead>
-                    <tbody>
-                      {movs.map((m, i) => (
-                        <tr key={i}>
-                          <td style={{ fontFamily:"monospace", fontSize:11 }}>{m.id ?? "—"}</td>
-                          <td>{m.tipo}</td>
-                          <td style={{ fontSize:11 }}>{m.data ?? "—"}</td>
-                          <td style={{ textAlign:"right", fontWeight:600, color: m.valor >= 0 ? "#10b981" : "#f43f5e" }}>
-                            {fmtEu(m.valor)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              );
-            })()}
           </div>
-        );
+          );
         })}
        </div>
       </div>
       )}
       </div>{/* fim da zona com scroll */}
 
-      {/* ── Rodapé de paginação (sempre visível) ── */}
-      {!loading && rows.length > 0 && (
-        <div style={{
-          flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between",
-          gap: 12, flexWrap: "wrap", paddingTop: 12, marginTop: 4, borderTop: "1px solid var(--border)",
-        }}>
-          <div style={{ fontSize: "0.75rem", color: MUTE }}>
-            A mostrar {start + 1}–{end} de {rows.length}
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <PresetBtn onClick={() => setPage(curPage - 1)} disabled={curPage <= 0}>‹ Anterior</PresetBtn>
-            <span style={{ fontSize: "0.78rem", color: "var(--text)", fontWeight: 600, minWidth: 96, textAlign: "center" }}>
-              Página {curPage + 1} de {totalPages}
-            </span>
-            <PresetBtn onClick={() => setPage(curPage + 1)} disabled={curPage >= totalPages - 1}>Seguinte ›</PresetBtn>
-            <select value={pageSize} onChange={e => setPageSize(Number(e.target.value))} style={{ marginLeft: 4 }}>
-              <option value={25}>25 / página</option>
-              <option value={50}>50 / página</option>
-              <option value={100}>100 / página</option>
-              <option value={0}>Todos</option>
-            </select>
-          </div>
-        </div>
+      {/* ── Modal com o detalhe da operação clicada ── */}
+      {modalRow && (
+        <Modal header={<ModalHeader row={modalRow} />} onClose={closeRow}>
+          <RowDetail row={modalRow} />
+        </Modal>
       )}
     </div>
+  );
+}
+
+// Cabeçalho do modal: empresa+ticker (esq.) · categoria (centro) · Net P/L com câmbio (dir.)
+function ModalHeader({ row }) {
+  let nome, sub, categoria, eur, data;
+  if (row._type === "dep") {
+    nome = row.descricao || row.nome_instrumento || "Movimento";
+    sub  = row.corretora;
+    categoria = row.tipo === "deposito" ? "Depósito" : "Levantamento";
+    eur  = row.tipo === "deposito" ? row.valor : -row.valor;
+    data = row.data?.slice(0, 10);
+  } else if (row._type === "div") {
+    nome = row.nome_instrumento || row.simbolo;
+    sub  = row.simbolo;
+    categoria = row.tipo === "INTEREST" ? "Juros" : "Dividendo";
+    eur  = row.valor_liq_eur ?? 0;
+    data = row.data_pagamento?.slice(0, 10);
+  } else {
+    nome = row.nome_instrumento || row.simbolo;
+    sub  = row.simbolo;
+    categoria = row.categoria;
+    eur  = row.pl_eur ?? 0;
+    data = row.data_fecho?.slice(0, 10);
+  }
+  const naoEur = !isEur(row.moeda_original) && row.taxa_cambio && row.taxa_cambio !== 1;
+  const orig   = naoEur ? toOrig(eur, row) : null;
+  // Efeito do câmbio = quanto a conversão reduziu/aumentou a MAGNITUDE do valor
+  // (consistente em ganhos e perdas). Ex.: $31,36 → €27,36 = −€4,00 / −12,75%.
+  const fxDiff = naoEur ? Math.abs(eur) - Math.abs(orig) : 0;
+  const fxPct  = naoEur && orig ? (fxDiff / Math.abs(orig)) * 100 : 0;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+      {/* Esquerda: empresa + ticker + data */}
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontWeight: 800, fontSize: "1rem", color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nome}</div>
+        <div style={{ fontSize: "0.74rem", fontWeight: 700, color: "#fbbf24" }}>{sub}</div>
+        {data && <div style={{ fontSize: "0.7rem", color: LGRAY }}>{data}</div>}
+      </div>
+      {/* Centro: categoria */}
+      <div style={{ flex: 1, textAlign: "center" }}>
+        <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#fff", textTransform: "uppercase", letterSpacing: ".06em", padding: "3px 12px", borderRadius: 20, background: "rgba(255,255,255,0.08)", border: "1px solid var(--border)", whiteSpace: "nowrap" }}>{categoria}</span>
+      </div>
+      {/* Direita: Net P/L (original cinza claro / € branco) + diferença cambial */}
+      <div style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+        <div style={{ fontSize: "0.58rem", color: LGRAY, textTransform: "uppercase", letterSpacing: ".06em" }}>Net P/L</div>
+        <div style={{ fontWeight: 800, fontSize: "0.95rem" }}>
+          {naoEur
+            ? <><span style={{ fontWeight: 700, color: LGRAY }}>{fmtNatSign(orig, row.moeda_original)}</span><span style={{ color: LGRAY }}> / </span><span style={{ color: "#fff" }}>{fmtEsign(eur)}</span></>
+            : <span style={{ color: "#fff" }}>{fmtEsign(eur)}</span>}
+        </div>
+        {naoEur && (
+          <div style={{ fontSize: "0.64rem", color: fxDiff >= 0 ? GREEN : RED }}>
+            câmbio {fmtEsign(fxDiff)} · {(fxPct >= 0 ? "+" : "") + fxPct.toFixed(2)}%
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Detalhe da operação dentro do modal (trade, movimento ou dividendo/juros).
+function RowDetail({ row }) {
+  if (row._type === "trade") return <TradeDetail t={row} />;
+
+  if (row._type === "dep") {
+    const d = row;
+    const isDep = d.tipo === "deposito";
+    return (
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "12px 22px", fontSize: 12.5 }}>
+        {[
+          ["Data",          d.data?.slice(0, 10)],
+          ["Tipo",          isDep ? "Depósito" : "Levantamento"],
+          ["Valor",         fmtE(d.valor)],
+          ["Corretora",     d.corretora],
+          ["Conta",         d.conta],
+          ["Titular Conta", d.conta_nome],
+          ["ID Operação",   d.ref_externa],
+          ["Descrição",     d.descricao],
+        ].map(([k, v]) => (
+          <div key={k} style={{ minWidth: 0 }}>
+            <div style={{ color: LGRAY, textTransform: "uppercase", fontSize: 10, letterSpacing: ".06em" }}>{k}</div>
+            <div style={{ color: "var(--text)", marginTop: 2, wordBreak: "break-word" }}>{v ?? "—"}</div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Dividendo / Juros
+  const d = row;
+  const movs = parseMovs(d);
+  return (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "12px 22px", fontSize: 12.5 }}>
+        {[
+          ["Data Pagamento",  d.data_pagamento?.slice(0, 10)],
+          ["País Fonte",      d.pais_fonte],
+          ["Moeda",           d.moeda],
+          ["Valor Bruto",     d.valor_bruto_eur != null ? fmtE(d.valor_bruto_eur) : "—"],
+          ["Retenção",        d.retencao_eur    != null ? `-${fmtE(d.retencao_eur)}` : "—"],
+          ["Valor Líquido",   d.valor_liq_eur   != null ? fmtE(d.valor_liq_eur)   : "—"],
+          ["Conta",           d.conta],
+          ["Titular Conta",   d.conta_nome],
+          ["Instrumento",     d.nome_instrumento],
+        ].map(([k, v]) => (
+          <div key={k} style={{ minWidth: 0 }}>
+            <div style={{ color: LGRAY, textTransform: "uppercase", fontSize: 10, letterSpacing: ".06em" }}>{k}</div>
+            <div style={{ color: "var(--text)", marginTop: 2 }}>{v ?? "—"}</div>
+          </div>
+        ))}
+      </div>
+      {movs.length > 0 && (
+        <div style={{ marginTop: 18 }}>
+          <div style={{ color: LGRAY, textTransform: "uppercase", fontSize: 10, letterSpacing: ".06em", marginBottom: 8 }}>
+            Todas as Operações ({movs.length})
+          </div>
+          <table className="data-table no-sticky">
+            <thead><tr><th>ID</th><th>Tipo</th><th>Data/Hora</th><th style={{ textAlign: "right" }}>Valor €</th></tr></thead>
+            <tbody>
+              {movs.map((m, i) => (
+                <tr key={i}>
+                  <td style={{ fontFamily: "monospace", fontSize: 11 }}>{m.id ?? "—"}</td>
+                  <td>{m.tipo}</td>
+                  <td style={{ fontSize: 11 }}>{m.data ?? "—"}</td>
+                  <td style={{ textAlign: "right", fontWeight: 600, color: m.valor >= 0 ? GREEN : RED }}>{fmtEu(m.valor)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
   );
 }

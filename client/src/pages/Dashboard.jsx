@@ -94,6 +94,53 @@ function StatIconCard({ icon, value, label, color, colorBg, onClick }) {
   );
 }
 
+// Card de métrica (estilo dos cards antigos): ícone com fundo da cor do card, a borda
+// muda para essa cor ao passar o rato, e ícone "i" com tooltip que abre POR BAIXO (para
+// não ser cortado no topo da página).
+function MetricCard({ icon, color, label, value, sub, subColor, info, onClick }) {
+  const [iShow, setIShow] = useState(false);
+  return (
+    <div onClick={onClick} style={{
+      position: "relative", flex: "1 1 0", minWidth: 190,
+      background: "var(--card)", border: "1px solid var(--border)", borderRadius: 14,
+      padding: "16px 18px", display: "flex", alignItems: "center", gap: 14,
+      cursor: onClick ? "pointer" : "default", transition: "border-color .2s, transform .2s",
+    }}
+      onMouseEnter={e => { e.currentTarget.style.borderColor = color; e.currentTarget.style.transform = "translateY(-2px)"; }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.transform = "translateY(0)"; }}>
+      {/* Símbolo (ícone) com fundo da cor do card */}
+      <div style={{ width: 44, height: 44, borderRadius: 12, flexShrink: 0, background: `${color}26`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {icon}
+      </div>
+      {/* Conteúdo */}
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ fontSize: "0.68rem", color: MUTE, fontWeight: 500, paddingRight: 16 }}>{label}</div>
+        <div style={{ fontSize: "1.2rem", fontWeight: 800, color: "var(--text)", lineHeight: 1.15, letterSpacing: "-0.5px" }}>{value}</div>
+        {sub && <div style={{ fontSize: "0.68rem", color: subColor || GREEN, marginTop: 2, fontWeight: 600 }}>{sub}</div>}
+      </div>
+      {/* "i" com tooltip por baixo */}
+      {info && (
+        <span style={{ position: "absolute", top: 11, right: 11 }}
+          onMouseEnter={() => setIShow(true)} onMouseLeave={() => setIShow(false)}>
+          <span style={{
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            width: 15, height: 15, borderRadius: "50%", border: `1px solid ${MUTE}`,
+            color: MUTE, fontSize: "0.58rem", fontStyle: "italic", fontWeight: 800, cursor: "help",
+          }}>i</span>
+          {iShow && (
+            <div style={{
+              position: "absolute", top: "calc(100% + 7px)", right: 0, width: 220,
+              background: "#1e1e2e", border: "1px solid rgba(255,255,255,0.14)",
+              borderRadius: 8, padding: "8px 11px", fontSize: "0.68rem", color: "#c4c4d4",
+              zIndex: 400, lineHeight: 1.5, boxShadow: "0 8px 22px rgba(0,0,0,0.5)",
+            }}>{info}</div>
+          )}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function Tip({ text, children }) {
   const [show, setShow] = useState(false);
   return (
@@ -332,6 +379,18 @@ export default function Dashboard({ user }) {
   const saveFairValue = async (simbolo, valor, moeda) => {
     try { await axios.post("/api/trades/fair-value", { simbolo, valor, moeda }); } catch { /* ignora */ }
     setFvEdit(null);
+    loadHoldings();
+  };
+
+  // Define manualmente o ticker da Yahoo de um símbolo (quando o automático não acerta).
+  const setTicker = async (h) => {
+    const atual = h.yahoo_ticker_efetivo || "";
+    const tk = window.prompt(
+      `Ticker da Yahoo Finance para ${h.simbolo} (ex.: AAPL, SAP.DE, COR.LS).\nDeixa vazio para voltar ao automático.`,
+      atual,
+    );
+    if (tk === null) return;                       // cancelou
+    try { await axios.post("/api/trades/yahoo-ticker", { simbolo: h.simbolo, ticker: tk.trim() }); } catch { /* ignora */ }
     loadHoldings();
   };
 
@@ -605,25 +664,76 @@ export default function Dashboard({ user }) {
   // Valor de mercado total da carteira (base para o "Peso" de cada posição).
   const holdingsTotalValue = holdings.reduce((s, h) => s + (h.valor_eur || 0), 0);
 
+  // ── Métricas dos 5 cards de topo ──
+  // Unrealized Returns: ganhos/perdas das posições ainda não vendidas (P/L não realizado).
+  const unrealTotal = holdings.reduce((s, h) => s + (h.pl_eur || 0), 0);
+  const unrealCost  = holdings.reduce((s, h) => s + (h.custo_eur || 0), 0);
+  const unrealPct   = unrealCost ? unrealTotal / unrealCost * 100 : null;
+  // Realized Returns: resultado de posições já vendidas (trades fechados).
+  const realizedNet = stats.net_pl ?? 0;
+  const realizedPct = costBasis ? realizedNet / costBasis * 100 : null;
+  // Dividends: rendimento de dividendos.
+  const divPct = costBasis ? dividendsLiq / costBasis * 100 : null;
+  // Currency Impact: efeito do câmbio nos resultados realizados de ativos estrangeiros.
+  const fxClosed = allTrades.filter(t => t.moeda_original && t.moeda_original !== "EUR" && t.pl_orig != null && t.taxa_cambio);
+  const currencyImpact = fxClosed.length
+    ? fxClosed.reduce((s, t) => s + (Math.abs(t.pl_eur || 0) - Math.abs(t.pl_orig || 0)), 0)
+    : null;
+  const realizedAbs = fxClosed.reduce((s, t) => s + Math.abs(t.pl_orig || 0), 0);
+  const currencyPct = currencyImpact != null && realizedAbs ? currencyImpact / realizedAbs * 100 : null;
+
   return (
-    <div style={{ height: "calc(100vh - 56px - var(--topbar-h))", display: "flex", flexDirection: "column" }}>
-      {/* ── Header fixo (sempre visível) ── */}
-      <div className="page-header" style={{ flexShrink: 0 }}>
+    <div>
+      {/* ── Header (desliza com a página, como nas outras) ── */}
+      <div className="page-header">
         <div className="page-title">Visão Geral</div>
         <div className="page-sub">Resumo do desempenho e da sua atividade de trading</div>
       </div>
 
-      {/* ── Conteúdo com scroll ── */}
-      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingRight: 4 }}>
-
-      {/* ── Top 5 stat icon cards ── */}
+      {/* ── 5 cards de topo (estilo dos cards antigos) ── */}
       <div style={{ display: "flex", gap: 12, marginBottom: 20, overflowX: "auto", paddingBottom: 4 }}>
-        <StatIconCard icon={IcoLine(PINK)}  colorBg="rgba(244,114,182,0.15)" color={PINK}   value={fmt(stats.net_pl ?? 0)}   label="Resultado Líquido" onClick={openAllTrades} />
-        <StatIconCard icon={IcoGrid(BLUE)}  colorBg="rgba(96,165,250,0.15)"  color={BLUE}   value={stats.n_trades}           label="Total de Trades"   onClick={openAllTrades} />
-        <StatIconCard icon={IcoPct(AMBER)}  colorBg="rgba(251,191,36,0.15)"  color={AMBER}  value={`${wr.toFixed(1)}%`}      label="Win Rate"          onClick={openWins} />
-        <StatIconCard icon={IcoCoin(GREEN)} colorBg="rgba(16,185,129,0.15)"  color={GREEN}  value={fmt(dividendsLiq)}        label="Dividendos"        onClick={openDivs} />
-        <StatIconCard icon={IcoBank(TEAL)}  colorBg="rgba(20,184,166,0.15)"  color={TEAL}   value={fmt(interestLiq)}         label="Juros"             onClick={openInterest} />
-        <StatIconCard icon={IcoBar(PURPLE)} colorBg="rgba(167,139,250,0.15)" color={PURPLE} value={pf.toFixed(2)}            label="Profit Factor"     onClick={openAllTrades} />
+        <MetricCard
+          icon={IcoBar(BLUE)} color={BLUE}
+          label="Retornos Não Realizados"
+          value={fmt(unrealTotal)}
+          sub={unrealPct != null ? pctTxt(unrealPct) : "—"}
+          subColor={unrealTotal >= 0 ? GREEN : RED}
+          info="Ganhos ou perdas das posições que ainda não vendeste (em carteira)."
+        />
+        <MetricCard
+          icon={IcoLine(PINK)} color={PINK}
+          label="Retornos Realizados"
+          value={fmt(realizedNet)}
+          sub={realizedPct != null ? pctTxt(realizedPct) : "—"}
+          subColor={realizedNet >= 0 ? GREEN : RED}
+          info="Ganhos ou perdas de posições já vendidas (operações fechadas)."
+          onClick={openAllTrades}
+        />
+        <MetricCard
+          icon={IcoCoin(GREEN)} color={GREEN}
+          label="Dividendos"
+          value={fmt(dividendsLiq)}
+          sub={divPct != null ? pctTxt(divPct) : "—"}
+          subColor={GREEN}
+          info="Rendimento recebido de pagamentos de dividendos."
+          onClick={openDivs}
+        />
+        <MetricCard
+          icon={IcoBank(AMBER)} color={AMBER}
+          label="Impacto Cambial"
+          value={currencyImpact != null ? fmt(currencyImpact) : "n/d"}
+          sub={currencyPct != null ? pctTxt(currencyPct) : "n/d"}
+          subColor={(currencyImpact ?? 0) >= 0 ? GREEN : RED}
+          info="Impacto das variações cambiais nos resultados realizados de ativos estrangeiros. Aparece após importar operações em moeda diferente do EUR."
+        />
+        <MetricCard
+          icon={IcoCoin(PURPLE)} color={PURPLE}
+          label="Dividendos Estimados"
+          value="n/d"
+          sub="próximos 12 meses"
+          subColor={MUTE}
+          info="Rendimento futuro estimado de dividendos nos próximos 12 meses. Requer dados de previsão que a aplicação ainda não tem."
+        />
       </div>
 
       {/* ── Total Acumulado + Repartição por categoria (lado a lado) ── */}
@@ -973,6 +1083,10 @@ export default function Dashboard({ user }) {
               <div style={{ fontSize: "0.72rem", color: MUTE, marginTop: 2 }}>Ano {ano}</div>
             </div>
             {[
+              { label: "Total de Trades", value: stats.n_trades,            sub: "operações fechadas",         color: "var(--text)", onClick: openAllTrades },
+              { label: "Win Rate",        value: `${wr.toFixed(1)}%`,       sub: "trades com lucro",           color: wr >= 50 ? GREEN : AMBER, onClick: openWins },
+              { label: "Profit Factor",   value: pf.toFixed(2),             sub: "ganhos ÷ perdas",            color: pf >= 1 ? GREEN : RED, onClick: openAllTrades },
+              { label: "Juros",           value: fmt(interestLiq),          sub: "saldos à ordem",             color: interestLiq >= 0 ? GREEN : RED, onClick: openInterest },
               { label: "Expectancy",      value: fmt(expectancy),           sub: "por trade",                  color: expectancy >= 0 ? GREEN : RED, onClick: openAllTrades },
               { label: "Max Drawdown",    value: `-${fmtAbs(maxDrawdown)}`, sub: "pico → vale",                color: RED,   onClick: openAllTrades },
               { label: "Avg Win",         value: fmt(stats.avg_win ?? 0),   sub: "por trade ganho",            color: GREEN, onClick: openWins },
@@ -1123,17 +1237,36 @@ export default function Dashboard({ user }) {
                       onMouseEnter={e => e.currentTarget.style.borderColor = "var(--accent)"}
                       onMouseLeave={e => e.currentTarget.style.borderColor = "var(--border)"}>
 
-                      {/* Nome do ativo */}
+                      {/* Nome do ativo + corretora */}
                       <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 800, color: "#fbbf24" }}>{h.simbolo}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                          <span style={{ fontWeight: 800, color: "#fbbf24" }}>{h.simbolo}</span>
+                          {h.corretora && (
+                            <span style={{ fontSize: "0.6rem", fontWeight: 700, color: MUTE,
+                              border: "1px solid var(--border)", borderRadius: 5, padding: "1px 5px", whiteSpace: "nowrap" }}>
+                              {h.corretora}
+                            </span>
+                          )}
+                        </div>
                         <div style={{ fontSize: "0.7rem", color: MUTE, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {h.nome || CAT_META[h.categoria]?.label || h.categoria || "—"}
                         </div>
                       </div>
 
-                      {/* Último preço */}
-                      <div style={{ fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap" }}>
-                        {fmtCur(h.preco_atual, h.moeda)}
+                      {/* Último preço (ao vivo da Yahoo, com fallback ao relatório) */}
+                      <div style={{ whiteSpace: "nowrap" }}>
+                        <div style={{ fontWeight: 700, color: "var(--text)" }}>{fmtCur(h.preco_atual, h.moeda)}</div>
+                        {h.preco_fonte === "yahoo" ? (
+                          <div style={{ fontSize: "0.62rem", color: GREEN, display: "flex", alignItems: "center", gap: 3 }}>
+                            <span style={{ width: 5, height: 5, borderRadius: "50%", background: GREEN, display: "inline-block" }} />
+                            ao vivo
+                          </div>
+                        ) : (
+                          <button onClick={e => { e.stopPropagation(); setTicker(h); }} title="Cotação ao vivo indisponível — definir ticker da Yahoo"
+                            style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: "0.62rem", color: "#f59e0b", textDecoration: "underline" }}>
+                            do relatório · definir ticker
+                          </button>
+                        )}
                       </div>
 
                       {/* Valor Justo (manual, com lápis) */}
@@ -1210,7 +1343,6 @@ export default function Dashboard({ user }) {
       <div style={{ fontSize: "0.66rem", color: MUTE, marginTop: 12, lineHeight: 1.5 }}>
         Posições abertas atualizadas a cada importação (secção <em>“Open Positions”</em> do relatório). <strong>Valor/Custo</strong> e <strong>Retorno Total</strong> em EUR; <strong>Último Preço</strong> e <strong>Preço Médio</strong> na moeda do ativo. <strong>Valor Justo</strong> é manual (ícone do lápis). A XTB normalmente não exporta posições abertas — usa o IBKR.
       </div>
-      </div>{/* ── fim do conteúdo com scroll ── */}
 
       {/* ── Modal ── */}
       {modal && (

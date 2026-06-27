@@ -159,6 +159,22 @@ function initSchema(db) {
     moeda         TEXT,
     atualizado_em TEXT
   )`); } catch {}
+  // País (ISO 2 letras, do ISIN) da posição — usado para mapear o ticker da Yahoo (bolsa).
+  try { db.exec("ALTER TABLE posicoes ADD COLUMN pais TEXT"); } catch {}
+  // ISIN completo (Security ID) — para pesquisa por ISIN no Registo de Operações.
+  try { db.exec("ALTER TABLE trades     ADD COLUMN isin TEXT"); } catch {}
+  try { db.exec("ALTER TABLE dividendos ADD COLUMN isin TEXT"); } catch {}
+  // Valores na moeda ORIGINAL da operação (antes da conversão para EUR) — para mostrar
+  // os montantes iguais aos da corretora ao lado do valor convertido.
+  try { db.exec("ALTER TABLE trades ADD COLUMN pl_orig            REAL"); } catch {}
+  try { db.exec("ALTER TABLE trades ADD COLUMN valor_compra_orig REAL"); } catch {}
+  try { db.exec("ALTER TABLE trades ADD COLUMN valor_venda_orig  REAL"); } catch {}
+  // Override manual do ticker da Yahoo por símbolo (persiste entre importações).
+  try { db.exec(`CREATE TABLE IF NOT EXISTS symbol_overrides (
+    simbolo       TEXT PRIMARY KEY,
+    yahoo_ticker  TEXT,
+    atualizado_em TEXT
+  )`); } catch {}
 
   // 3. Índices únicos (só depois de garantir que as colunas existem)
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_ref

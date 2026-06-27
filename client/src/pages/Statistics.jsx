@@ -7,8 +7,15 @@ import {
 } from "recharts";
 
 const GREEN="#10b981",RED="#f43f5e",BLUE="#4f6af5",MUTE="#4e6080";
-const fmt    = v => (v>=0?"+":"")+"€ "+Math.abs(v).toLocaleString("de-DE",{minimumFractionDigits:2});
+const fmt    = v => (v>=0?"+":"")+"€ "+Math.abs(v).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtPL  = v => (v<0?"-":"")+"€ "+Math.abs(v).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});
+// Valor na moeda original do ativo (ex: US$, igual ao da corretora).
+const CUR_SYMBOL = { USD:"US$ ", EUR:"€ ", GBP:"£ ", CHF:"CHF ", CAD:"C$ ", JPY:"¥ ", AUD:"A$ " };
+const fmtOrig = (v, moeda) => {
+  if (v == null) return "—";
+  const sym = CUR_SYMBOL[moeda] || (moeda ? moeda+" " : "");
+  return (v>=0?"+":"-")+sym+Math.abs(v).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});
+};
 const brokerTotals = trades => Object.entries(
   trades.reduce((acc,t) => {
     const b = t.corretora||"—";
@@ -150,19 +157,26 @@ export default function Statistics() {
             </div>
           </div>
           <div className="section-title">Resumo por instrumento</div>
-          <table className="data-table">
+          <table className="data-table no-sticky">
             <thead><tr><th>Símbolo</th><th>Trades</th><th>Wins</th><th>Win Rate</th><th>P&L Total</th><th>P&L Médio</th></tr></thead>
             <tbody>
-              {bySymbol.map(s => (
-                <tr key={s.simbolo}>
-                  <td style={{fontWeight:700,color:"var(--text)"}}>{s.simbolo}</td>
-                  <td>{s.n_trades}</td>
-                  <td>{s.n_wins}</td>
-                  <td>{(s.n_wins/s.n_trades*100).toFixed(1)}%</td>
-                  <td style={{color:s.pl_total>=0?GREEN:RED,fontWeight:700}}>{fmt(s.pl_total)}</td>
-                  <td style={{color:s.avg_pl>=0?GREEN:RED}}>{fmt(s.avg_pl)}</td>
-                </tr>
-              ))}
+              {bySymbol.map(s => {
+                const naoEur = s.moeda && s.moeda !== "EUR";
+                return (
+                  <tr key={s.simbolo}>
+                    <td style={{fontWeight:700,color:"var(--text)"}}>{s.simbolo}</td>
+                    <td>{s.n_trades}</td>
+                    <td>{s.n_wins}</td>
+                    <td>{(s.n_wins/s.n_trades*100).toFixed(1)}%</td>
+                    <td style={{color:s.pl_total>=0?GREEN:RED,whiteSpace:"nowrap"}}>
+                      {naoEur ? <><strong>{fmtOrig(s.pl_total_orig, s.moeda)}</strong> <span style={{color:MUTE,fontWeight:600}}>({fmt(s.pl_total)})</span></> : <strong>{fmt(s.pl_total)}</strong>}
+                    </td>
+                    <td style={{color:s.avg_pl>=0?GREEN:RED,whiteSpace:"nowrap"}}>
+                      {naoEur ? <><strong>{fmtOrig(s.avg_pl_orig, s.moeda)}</strong> <span style={{color:MUTE}}>({fmt(s.avg_pl)})</span></> : fmt(s.avg_pl)}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </>

@@ -415,6 +415,7 @@ select option { background: var(--sidebar); }
   border-bottom: 1px solid var(--border); font-weight: 600;
   position: sticky; top: 0; z-index: 2;
 }
+.data-table.no-sticky th { position: static; }
 .data-table td { padding: 11px 14px; border-bottom: 1px solid var(--border); color: var(--text); }
 .data-table tr:last-child td { border-bottom: none; }
 .data-table tr:hover td { background: rgba(255,255,255,.025); }

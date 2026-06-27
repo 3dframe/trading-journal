@@ -1,8 +1,29 @@
 const express = require("express");
 const router = express.Router();
 const { getDb } = require("../db");
+const fx     = require("../fx");
+const quotes = require("../quotes");
 
 const yearParam = (v) => (v && /^\d{4}$/.test(String(v)) ? String(v) : null);
+
+// Sufixo da Yahoo por país de incorporação (ISO 2 letras, do ISIN). Aproximação à bolsa
+// principal — corrigível por símbolo via override manual (symbol_overrides).
+const YAHOO_SUFFIX = {
+  US: "", DE: ".DE", PT: ".LS", NL: ".AS", FR: ".PA", ES: ".MC", IT: ".MI",
+  GB: ".L", BE: ".BR", CH: ".SW", AT: ".VI", FI: ".HE", IE: ".DE", LU: ".DE",
+};
+
+// Constrói o ticker da Yahoo para uma posição.
+function yahooTicker(h) {
+  if (h.yahoo_ticker) return h.yahoo_ticker;          // override manual do utilizador
+  const sym = (h.simbolo || "").toUpperCase();
+  if (!sym) return null;
+  if (h.moeda === "USD") return sym;                  // EUA → ticker directo
+  const suf = YAHOO_SUFFIX[h.pais];
+  if (suf !== undefined && suf !== "") return sym + suf;
+  if (h.moeda === "EUR") return sym + ".DE";          // por defeito, Xetra
+  return null;                                        // sem mapeamento → fica o preço do relatório
+}
 
 // GET /api/trades
 router.get("/", (req, res) => {
@@ -168,7 +189,8 @@ router.get("/by-symbol", (req, res) => {
 
     res.json(db.prepare(`SELECT
       simbolo, COUNT(*) as n_trades, SUM(pl_eur) as pl_total,
-      SUM(CASE WHEN pl_eur > 0 THEN 1 ELSE 0 END) as n_wins, AVG(pl_eur) as avg_pl
+      SUM(CASE WHEN pl_eur > 0 THEN 1 ELSE 0 END) as n_wins, AVG(pl_eur) as avg_pl,
+      SUM(pl_orig) as pl_total_orig, AVG(pl_orig) as avg_pl_orig, MAX(moeda_original) as moeda
     FROM trades ${where} GROUP BY simbolo ORDER BY pl_total DESC`).all(...params));
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -177,16 +199,67 @@ router.get("/by-symbol", (req, res) => {
 
 // GET /api/trades/holdings
 // "Ações em Carteira" — posições abertas (snapshot da secção "Open Positions" dos
-// relatórios, atualizado a cada importação). Junta o valor justo manual (fair_value).
-router.get("/holdings", (req, res) => {
+// relatórios). Junta o valor justo manual (fair_value) e o override do ticker
+// (symbol_overrides) e atualiza o "Último Preço" com a cotação ao vivo da Yahoo (com
+// fallback para o preço do relatório). Recalcula valor/retorno em EUR com o preço vivo.
+router.get("/holdings", async (req, res) => {
   try {
     const db = getDb(req.session.user.username);
     const rows = db.prepare(`
-      SELECT p.*, f.valor AS valor_justo, f.moeda AS valor_justo_moeda
+      SELECT p.*, f.valor AS valor_justo, f.moeda AS valor_justo_moeda,
+             o.yahoo_ticker AS yahoo_ticker
       FROM posicoes p
-      LEFT JOIN fair_value f ON f.simbolo = p.simbolo
+      LEFT JOIN fair_value      f ON f.simbolo = p.simbolo
+      LEFT JOIN symbol_overrides o ON o.simbolo = p.simbolo
       ORDER BY ABS(COALESCE(p.valor_eur, 0)) DESC`).all();
+
+    // Cotações ao vivo (Yahoo) para os tickers mapeados.
+    const tickerByRow = rows.map(yahooTicker);
+    let quoteMap = {};
+    try { quoteMap = await quotes.getQuotes(tickerByRow); } catch { quoteMap = {}; }
+
+    const hoje = new Date().toISOString().slice(0, 10);
+    rows.forEach((h, i) => {
+      const tk = tickerByRow[i];
+      h.yahoo_ticker_efetivo = tk;
+      const q = tk ? quoteMap[tk] : null;
+      if (q && q.price != null) {
+        h.preco_atual = q.price;                       // último preço ao vivo (moeda nativa)
+        h.preco_fonte = "yahoo";
+        const moeda = q.currency || h.moeda;
+        const rate  = fx.eurPerUnit(moeda, hoje) || 1;
+        if (h.quantidade != null) {
+          h.valor_eur = +(h.quantidade * q.price * rate).toFixed(2);
+          if (h.custo_eur != null) h.pl_eur = +(h.valor_eur - h.custo_eur).toFixed(2);
+        }
+      } else {
+        h.preco_fonte = "relatorio";                   // sem cotação → fica o preço do relatório
+      }
+    });
+
     res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/trades/yahoo-ticker — define/remove o ticker Yahoo manual de um símbolo.
+// Body: { simbolo, ticker }. ticker vazio/null remove o override (volta ao automático).
+router.post("/yahoo-ticker", (req, res) => {
+  try {
+    const { simbolo, ticker } = req.body || {};
+    if (!simbolo) return res.status(400).json({ error: "Símbolo obrigatório." });
+    const db = getDb(req.session.user.username);
+    const tk = (ticker || "").trim();
+    if (!tk) {
+      db.prepare("DELETE FROM symbol_overrides WHERE simbolo = ?").run(simbolo);
+    } else {
+      db.prepare(`INSERT INTO symbol_overrides (simbolo, yahoo_ticker, atualizado_em)
+        VALUES (?,?,?)
+        ON CONFLICT(simbolo) DO UPDATE SET yahoo_ticker=excluded.yahoo_ticker, atualizado_em=excluded.atualizado_em`)
+        .run(simbolo, tk, new Date().toISOString());
+    }
+    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

@@ -23,11 +23,38 @@
   Categoria" — decidir se se remove.
 - **Seletor de ano removido** do cabeçalho do Dashboard (a pedido) — Dashboard fica no ano
   mais recente. Se quiser trocar de ano, é preciso realocar o seletor.
-- **Feed de cotações / valor justo automático**: "Último Preço" das Holdings é o preço de
-  fecho à data do relatório (atualiza a cada importação), não em tempo real. Valor Justo é
-  manual. Integrar API externa fica para decisão futura.
+- **Dividendos Estimados** e (sem dados) o **Impacto Cambial** quando não há operações em
+  moeda estrangeira → cards mostram "n/d". Estimativa de dividendos precisa de previsões.
+- **StatIconCard / ícones IcoGrid/IcoPct** ficaram sem uso após o redesign dos cards de
+  topo — limpar quando houver oportunidade.
 
-## Feito na sessão de 2026-06-27
+## Feito na sessão de 2026-06-27 (parte 2 — cotações, valores originais, redesign Registo)
+- **Cotações ao vivo (Yahoo)**: novo `server/quotes.js` (endpoint v8/chart, cache 15min);
+  `/api/trades/holdings` enriquece o "Último Preço" com a cotação Yahoo (EUA direto; EU por
+  país do ISIN → sufixo de bolsa; override manual do ticker via `symbol_overrides`). Coluna
+  `pais` em `posicoes`. Recalcula valor/retorno/peso com o preço vivo. Corretora no título do card.
+- **Valores originais ($) + convertidos (€)**: colunas `pl_orig/valor_compra_orig/valor_venda_orig`
+  em `trades`; parsers IBKR/XTB guardam o valor nativo. `by-symbol` devolve totais originais.
+  Mostrado no Registo (detalhe), Estatísticas (Resumo por instrumento). Moeda da conta XTB
+  detetada pelo **prefixo do nome do ficheiro** (`EUR_`/`USD_`), com o mapa por conta como fallback.
+- **Pesquisa no Registo** por símbolo, **ID/ref_externa** e **ISIN/Security ID** (colunas `isin`
+  em trades/dividendos; IBKR capta da pré-passagem, dividendos da Description).
+- **Redesign do "Registo de Operações"**: cabeçalho de colunas; ordem Data·Empresa·Corretora·
+  País·Categoria·Valor·Swap·Resultado (centradas as do meio); valor `€/orig` (€ em cima, original
+  cinza claro em baixo); 2 casas decimais; paginação removida (página livre); clique abre **modal**
+  (em vez de expandir) com a linha clicada delineada ao voltar; modal com cabeçalho próprio
+  (empresa+ticker+data | categoria | Net P/L com **câmbio** = diferença de magnitude, cor pelo
+  sinal). Total da página mostra "efeito do câmbio".
+- **Importação**: transparência dos "Ignorados" (lista dos duplicados na pré-visualização +
+  mensagens claras "já existia na BD"); contagem de posições; removido botão "Remover" do histórico.
+- **Sessão/UI**: cookie de sessão (login a cada abertura do browser); menu de utilizador global
+  numa barra de topo (fix do overlap); reset à BD em Administração (dupla confirmação).
+- **Visão Geral**: 5 cards de topo (Retornos Não Realizados, Realizados, Dividendos, Impacto
+  Cambial, Dividendos Estimados) estilo ícone+cor no hover, com "i"/tooltip por baixo; métricas
+  antigas (Total Trades, Win Rate, Profit Factor, Juros) movidas p/ "Métricas Detalhadas";
+  Repartição por Categoria dinâmica; removido o scroll interno (só o topo do utilizador fica fixo).
+
+## Feito na sessão de 2026-06-27 (parte 1)
 - **Sessão/login**: cookie passou a ser de sessão (sem maxAge → expira ao fechar o browser,
   obriga sempre a login); ttl do FileStore reduzido p/ 1 dia; sessões antigas limpas. Em
   `server/index.js`.
