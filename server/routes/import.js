@@ -441,7 +441,10 @@ async function parseXTB(buffer, filename = "") {
         // Agrupa juros do mesmo dia
         const key = date?.slice(0, 10) || "?";
         if (!interestMap.has(key)) {
-          interestMap.set(key, { simbolo: "JUROS_XTB", data_pagamento: date, valor_bruto_eur: 0, retencao_eur: 0, valor_liq_eur: 0, pais_fonte: "Polónia", moeda: accountCurrency, corretora: "XTB", conta: accountNumber, conta_nome: null, produto: opProduct, tipo: "INTEREST", _movs: [] });
+          // Juros 'Free-funds' da XTB: rendimento NACIONAL (sucursal portuguesa, NIF 980/contas PT50),
+          // já tributado na fonte a 28% e dispensado de declaração. País = Portugal (não a sede polaca da XTB),
+          // para nunca ser confundido com juros estrangeiros (IBKR/Irlanda) no Anexo J Q8.
+          interestMap.set(key, { simbolo: "JUROS_XTB", data_pagamento: date, valor_bruto_eur: 0, retencao_eur: 0, valor_liq_eur: 0, pais_fonte: "Portugal", moeda: accountCurrency, corretora: "XTB", conta: accountNumber, conta_nome: null, produto: opProduct, tipo: "INTEREST", _movs: [] });
         }
         interestMap.get(key).valor_bruto_eur += Math.abs(amount);
         interestMap.get(key)._movs.push({ id: opId, tipo: "Free funds interest", valor: amount, data: date });
@@ -525,6 +528,16 @@ async function parseXTB(buffer, filename = "") {
       const rate = eurRate(accountCurrency, d.data_pagamento);
       if (!rate) { convFailed.push(d.simbolo); continue; }
       for (const f of ["valor_bruto_eur", "retencao_eur", "valor_liq_eur"]) if (d[f] != null) d[f] = +(d[f] * rate).toFixed(4);
+      // Converter também o detalhe linha-a-linha (movimentos) para EUR — caso contrário a
+      // tabela "Todas as Operações" (cabeçalho "Valor €") mostraria os montantes na moeda
+      // original (ex: USD) que não reconciliam com os totais já convertidos do cartão.
+      if (d.movimentos) {
+        try {
+          const movs = JSON.parse(d.movimentos).map(m =>
+            ({ ...m, valor: m.valor != null ? +(m.valor * rate).toFixed(4) : m.valor }));
+          d.movimentos = JSON.stringify(movs);
+        } catch {}
+      }
     }
     for (const dp of deposits) {
       const rate = eurRate(accountCurrency, dp.data);
@@ -852,6 +865,15 @@ async function parseIBKR(buffer) {
         d.valor_bruto_eur = +(d.valor_bruto_eur * rate).toFixed(4);
         d.retencao_eur    = +(d.retencao_eur    * rate).toFixed(4);
         d.valor_liq_eur   = +(d.valor_liq_eur   * rate).toFixed(4);
+        // Converter também o detalhe linha-a-linha para EUR, para reconciliar com o cartão
+        // (a tabela "Todas as Operações" tem cabeçalho "Valor €").
+        if (d.movimentos) {
+          try {
+            const movs = JSON.parse(d.movimentos).map(m =>
+              ({ ...m, valor: m.valor != null ? +(m.valor * rate).toFixed(4) : m.valor }));
+            d.movimentos = JSON.stringify(movs);
+          } catch {}
+        }
       }
     }
     delete d._currency;

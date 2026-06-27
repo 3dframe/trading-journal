@@ -335,7 +335,7 @@ function TabJQ92B({ data, ano }) {
 }
 
 // D) Anexo J Q8
-function TabJQ8({ data }) {
+function TabJQ8({ data, dispensados }) {
   const { linhas = [], por_pais = [] } = data || {};
   const divs  = por_pais.filter(r => r.tipo === "DIVIDEND");
   const juros = por_pais.filter(r => r.tipo === "INTEREST");
@@ -413,6 +413,34 @@ function TabJQ8({ data }) {
           />
         </div>
       )}
+
+      {dispensados && dispensados.linhas?.length > 0 && (() => {
+        const moedas = [...new Set(dispensados.linhas.map(l => l.moeda).filter(Boolean))];
+        const naoEur = moedas.filter(m => m !== "EUR");
+        return (
+        <div style={{ background: "#14532d22", border: "1px solid #22c55e66", borderRadius: 8,
+          padding: "12px 16px", marginTop: 18, fontSize: 12 }}>
+          <div style={{ fontWeight: 700, color: C.green, marginBottom: 6 }}>
+            ℹ️ Juros XTB — Rendimento Nacional Dispensado de Declaração
+          </div>
+          <div style={{ color: C.muted, lineHeight: 1.5, marginBottom: 8 }}>
+            A XTB opera em Portugal através de sucursal nacional (NIF 980…, contas PT50…). Estes juros
+            ('Free-funds Interest') são rendimento obtido em Portugal, já tributado na fonte à taxa
+            liberatória de 28%. <strong>Não vão ao Anexo J</strong> e estão dispensados de declaração
+            no IRS (salvo opção por englobamento). Mostrados aqui apenas a título informativo.
+            {naoEur.length > 0 && (
+              <> <em>(conta em {naoEur.join("/")} — valores convertidos para EUR)</em></>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+            <span>Juro Bruto: <strong style={{ color: C.green }}>{fmtE(dispensados.bruto_eur)}</strong></span>
+            <span>Retenção na fonte: <strong style={{ color: C.red }}>-{fmtE(dispensados.retencao_eur)}</strong></span>
+            <span>Líquido Recebido: <strong style={{ color: C.blue }}>{fmtE(dispensados.liquido_eur)}</strong></span>
+            <span style={{ color: C.muted }}>{dispensados.linhas.length} pagamento(s)</span>
+          </div>
+        </div>
+        );
+      })()}
     </>
   );
 }
@@ -577,7 +605,7 @@ export default function IRS() {
             {tab === 0 && <TabGQ9   rows={d.g_q9    || []} />}
             {tab === 1 && <TabJQ92A rows={d.j_q9_2a || []} />}
             {tab === 2 && <TabJQ92B data={d.j_q9_2b} ano={ano} />}
-            {tab === 3 && <TabJQ8   data={d.j_q8} />}
+            {tab === 3 && <TabJQ8   data={d.j_q8} dispensados={d.juros_nacionais_xtb} />}
             {tab === 4 && <TabJQ11  data={d.j_q11} />}
           </div>
         </>

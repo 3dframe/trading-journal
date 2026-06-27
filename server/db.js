@@ -176,6 +176,38 @@ function initSchema(db) {
     atualizado_em TEXT
   )`); } catch {}
 
+  // Migration de dados: os juros 'Free-funds' da XTB são rendimento NACIONAL (sucursal
+  // portuguesa, já tributado na fonte a 28%), não rendimento polaco. Importações antigas
+  // gravaram pais_fonte = 'Polónia' — corrigir para 'Portugal' para refletir a regra fiscal
+  // e não os misturar com juros estrangeiros (IBKR/Irlanda) no Anexo J Q8.
+  try { db.exec("UPDATE dividendos SET pais_fonte = 'Portugal' WHERE UPPER(corretora) = 'XTB' AND tipo = 'INTEREST' AND pais_fonte = 'Polónia'"); } catch {}
+
+  // Migration de dados: nas contas XTB não-EUR, o detalhe linha-a-linha (movimentos) de
+  // dividendos/juros ficou na moeda original (ex: USD) enquanto os totais já tinham sido
+  // convertidos para EUR — a tabela "Todas as Operações" (cabeçalho "Valor €") não reconciliava
+  // com o cartão. Reescala os movimentos para EUR usando a taxa implícita do próprio registo
+  // (valor_bruto_eur ÷ soma bruta original). Idempotente: linhas já em EUR reconciliam
+  // (soma ≈ bruto) e são ignoradas em execuções seguintes.
+  try {
+    const rows = db.prepare(
+      "SELECT id, valor_bruto_eur, movimentos FROM dividendos WHERE moeda IS NOT NULL AND UPPER(moeda) <> 'EUR' AND movimentos IS NOT NULL"
+    ).all();
+    const upd = db.prepare("UPDATE dividendos SET movimentos = ? WHERE id = ?");
+    const isTax = m => /tax|withhold/i.test(m.tipo || "");
+    for (const r of rows) {
+      let movs;
+      try { movs = JSON.parse(r.movimentos); } catch { continue; }
+      if (!Array.isArray(movs) || !movs.length) continue;
+      const grossSum = movs.filter(m => !isTax(m)).reduce((s, m) => s + Math.abs(m.valor || 0), 0);
+      const bruto = r.valor_bruto_eur || 0;
+      if (grossSum <= 0 || bruto <= 0) continue;
+      if (Math.abs(grossSum - bruto) / bruto <= 0.01) continue;   // já em EUR → ignora
+      const rate = bruto / grossSum;
+      const conv = movs.map(m => ({ ...m, valor: m.valor != null ? +(m.valor * rate).toFixed(4) : m.valor }));
+      upd.run(JSON.stringify(conv), r.id);
+    }
+  } catch {}
+
   // 3. Índices únicos (só depois de garantir que as colunas existem)
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_ref
     ON trades(corretora, ref_externa) WHERE ref_externa IS NOT NULL`); } catch {}

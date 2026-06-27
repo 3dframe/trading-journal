@@ -95,8 +95,9 @@ A página `client/src/pages/IRS.jsx` atua como uma **Interface de Conferência e
 
 ### D) Anexo J - Quadro 8 (Rendimentos de Capitais: Dividendos e Juros)
 - **Dividendos Estrangeiros:** Extrai os dividendos internacionais (incluindo `EDPR.PT`). Devem ser exibidos pelo seu valor **BRUTO** em EUR, associando na mesma linha a respetiva retenção na fonte (`Withholding Tax` convertido para EUR) e o Código do País da Fonte. Isto permite acionar o crédito por dupla tributação internacional (Cód. Rendimento E21).
-- **Juros Estrangeiros:** Mapeia os juros bruros recebidos sobre saldos à ordem ('Free-funds Interest' da XTB e 'Interest' positivo da IBKR) convertidos para EUR (Cód. Rendimento E20).
+- **Juros Estrangeiros:** Mapeia os juros bruros recebidos sobre saldos à ordem **da IBKR** ('Interest' positivo, com fonte na Irlanda) convertidos para EUR (Cód. Rendimento E20).
 - **Campos Visuais da Grelha:** [País da Fonte] | [Cód. Rendimento (E21 ou E20)] | [Rendimento Bruto (EUR)] | [Imposto Retido no Estrangeiro (EUR)].
+- **⚠️ EXCEÇÃO XTB (Juros Nacionais — EXCLUIR do Anexo J):** Os juros pagos pela XTB ('Free-funds Interest') e a respetiva retenção ('Free-funds Interest Tax') **NÃO** são rendimentos estrangeiros. Como a XTB opera em Portugal através de uma sucursal nacional (NIF português iniciado por `980` e contas `PT50`), estes juros são considerados rendimentos obtidos em Portugal. A própria XTB retém automaticamente na fonte a taxa liberatória de 28%, pelo que o rendimento fica totalmente tributado e o titular está **dispensado de o declarar no IRS** (salvo opção por englobamento, que não é objetivo desta app). Estas linhas devem ser **terminantemente excluídas do Quadro 8 do Anexo J** e nunca somadas aos juros estrangeiros da IBKR. Podem, opcionalmente, ser exibidas apenas num **cartão informativo lateral de "Rendimentos Dispensados de Declaração"**, mostrando o juro bruto, a retenção de 28% e o valor líquido — a título meramente informativo, sem qualquer impacto nos quadros declarativos.
 
 ### E) Anexo J - Quadro 11 (Contas no Estrangeiro)
 - **Regra:** Exibir um cartão informativo de controlo fixo a alertar para a obrigatoriedade de declarar a conta da IBKR.
@@ -126,5 +127,11 @@ A IA deve atuar como um perito em fiscalidade portuguesa de ativos financeiros, 
    - Como os CFDs na XTB usam o mesmo Ticker das ações normais, o parser deve diferenciar o produto inspecionando a coluna 'Type' em conjunto com as colunas 'Swap' ou 'Rollover'.
    - Se a linha contiver valores preenchidos em 'Swap' ou 'Rollover', ou o tipo de ativo for identificado como CFD, a transação deve ser tratada como Derivado (Anexo J, Quadro 9.2B) e nunca como Ação.
 
-3. Filosofia de Output do Ecrã de IRS (`IRS.jsx`):
+3. Regra de Segregação de Juros e Retenções Nacionais (XTB):
+   - O motor de dados deve **isolar** as linhas de juros da XTB ('Free-funds Interest') e a respetiva retenção ('Free-funds Interest Tax') das restantes operações de capitais, marcando-as como **rendimento nacional já tributado na fonte**.
+   - Justificação fiscal: a XTB opera em Portugal através de uma sucursal nacional (NIF português `980...` e contas `PT50...`), pelo que estes juros são rendimentos obtidos em Portugal. A XTB aplica automaticamente a taxa liberatória de 28% na fonte, deixando o rendimento totalmente tributado e dispensado de declaração no IRS (salvo englobamento, fora do âmbito da app).
+   - Estas linhas **NUNCA** podem ser misturadas nem somadas com os juros estrangeiros da IBKR (que têm fonte na Irlanda e vão obrigatoriamente para o Anexo J, Quadro 8, Cód. E20). É o oposto exato do tratamento da IBKR.
+   - Encaminhamento: excluir do Quadro 8 do Anexo J. O destino máximo permitido é um cartão informativo lateral de "Rendimentos Dispensados de Declaração", sem qualquer reflexo nas grelhas declarativas de copy-paste.
+
+4. Filosofia de Output do Ecrã de IRS (`IRS.jsx`):
    - O objetivo desta página é o controlo visual e a disponibilização de dados brutos e exatos, estruturados especificamente para facilitar o 'copy-paste' direto para as grelhas do Portal das Finanças. Não deve incluir cálculos de estimativas de imposto ou simulações de englobamento no topo dos quadros.

@@ -9,6 +9,8 @@ import {
 const GREEN="#10b981",RED="#f43f5e",BLUE="#4f6af5",MUTE="#4e6080";
 const fmt    = v => (v>=0?"+":"")+"€ "+Math.abs(v).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtPL  = v => (v<0?"-":"")+"€ "+Math.abs(v).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});
+// Valor em € com sinal explícito (+/−) — usado na diferença cambial.
+const fmtSigned = v => (v>=0?"+":"-")+"€ "+Math.abs(v).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});
 // Valor na moeda original do ativo (ex: US$, igual ao da corretora).
 const CUR_SYMBOL = { USD:"US$ ", EUR:"€ ", GBP:"£ ", CHF:"CHF ", CAD:"C$ ", JPY:"¥ ", AUD:"A$ " };
 const fmtOrig = (v, moeda) => {
@@ -107,6 +109,22 @@ export default function Statistics() {
     setModal({ title: "📊 Distribuição — Todas as Trades", trades: all, brokers: brokerTotals(all), summary: { label: `${all.length} trades`, value: total } });
   };
 
+  // Efeito cambial agregado por moeda (apenas instrumentos em moeda ≠ EUR). A diferença
+  // mede quanto a conversão para euro alterou o P&L face ao valor na moeda original.
+  const fxByMoeda = Object.values(bySymbol.reduce((acc, s) => {
+    if (!s.moeda || s.moeda === "EUR") return acc;
+    const r = acc[s.moeda] || (acc[s.moeda] = { moeda: s.moeda, orig: 0, eur: 0, n: 0 });
+    r.orig += s.pl_total_orig ?? 0;
+    r.eur  += s.pl_total ?? 0;
+    r.n    += s.n_trades ?? 0;
+    return acc;
+  }, {})).map(r => ({ ...r, delta: r.eur - r.orig, pct: r.orig ? (r.eur - r.orig) / Math.abs(r.orig) * 100 : 0 }))
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+  const fxTotalDelta = fxByMoeda.reduce((s, r) => s + r.delta, 0);
+  const fxTotalEur   = fxByMoeda.reduce((s, r) => s + r.eur, 0);
+  const fxRawTotal   = fxByMoeda.reduce((s, r) => s + r.orig, 0);
+  const fxTotalPct   = fxRawTotal ? (fxTotalDelta / Math.abs(fxRawTotal)) * 100 : 0;
+
   const tabs = ["📊 Por instrumento","📅 Por período","🎯 Distribuição"];
 
   return (
@@ -156,12 +174,65 @@ export default function Statistics() {
               </ResponsiveContainer>
             </div>
           </div>
+          {fxByMoeda.length > 0 && (
+            <div className="card" style={{ marginBottom: 20 }}>
+              <div className="section-title" style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+                <span>💱 Efeito cambial</span>
+                <span style={{ fontSize: "0.72rem", fontWeight: 400, color: MUTE }}>
+                  diferença entre o P&L na moeda original e o convertido para euro
+                </span>
+              </div>
+
+              {/* Destaque: diferença total + % */}
+              <div style={{ display: "flex", alignItems: "baseline", gap: 14, margin: "4px 0 16px" }}>
+                <span style={{ fontSize: "1.7rem", fontWeight: 800, color: fxTotalDelta >= 0 ? GREEN : RED }}>
+                  {fmtSigned(fxTotalDelta)}
+                </span>
+                <span style={{ fontSize: "1rem", fontWeight: 700, color: fxTotalDelta >= 0 ? GREEN : RED }}>
+                  {(fxTotalPct >= 0 ? "+" : "") + fxTotalPct.toFixed(2)}%
+                </span>
+                <span style={{ fontSize: "0.78rem", color: MUTE }}>
+                  sobre {fmt(fxTotalEur)} em moeda estrangeira
+                </span>
+              </div>
+
+              {/* Detalhe por moeda */}
+              <table className="data-table no-sticky">
+                <thead><tr>
+                  <th>Moeda</th><th>Trades</th><th>P&L Original</th><th>P&L em €</th><th>Diferença</th><th>%</th>
+                </tr></thead>
+                <tbody>
+                  {fxByMoeda.map(r => (
+                    <tr key={r.moeda}>
+                      <td style={{ fontWeight: 700, color: "var(--text)" }}>{r.moeda}</td>
+                      <td>{r.n}</td>
+                      <td style={{ whiteSpace: "nowrap", fontWeight: 600 }}>{fmtOrig(r.orig, r.moeda)}</td>
+                      <td style={{ whiteSpace: "nowrap", color: r.eur >= 0 ? GREEN : RED }}>{fmt(r.eur)}</td>
+                      <td style={{ whiteSpace: "nowrap", fontWeight: 700, color: r.delta >= 0 ? GREEN : RED }}>{fmtSigned(r.delta)}</td>
+                      <td style={{ whiteSpace: "nowrap", fontWeight: 700, color: r.delta >= 0 ? GREEN : RED }}>{(r.pct >= 0 ? "+" : "") + r.pct.toFixed(2)}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
           <div className="section-title">Resumo por instrumento</div>
           <table className="data-table no-sticky">
             <thead><tr><th>Símbolo</th><th>Trades</th><th>Wins</th><th>Win Rate</th><th>P&L Total</th><th>P&L Médio</th></tr></thead>
             <tbody>
               {bySymbol.map(s => {
                 const naoEur = s.moeda && s.moeda !== "EUR";
+                // Diferença cambial: quanto a conversão para € alterou o resultado face ao
+                // valor na moeda original. O % é igual para Total e Médio (avg = total/n).
+                const fxTotal = naoEur ? (s.pl_total ?? 0) - (s.pl_total_orig ?? 0) : 0;
+                const fxAvg   = naoEur ? (s.avg_pl   ?? 0) - (s.avg_pl_orig   ?? 0) : 0;
+                const fxPct   = naoEur && s.pl_total_orig ? (fxTotal / Math.abs(s.pl_total_orig)) * 100 : 0;
+                const fxLine = delta => (
+                  <div style={{fontSize:"0.71rem",marginTop:2,fontWeight:600,color:delta>=0?GREEN:RED}}>
+                    câmbio {fmtSigned(delta)} · {(fxPct>=0?"+":"")+fxPct.toFixed(2)}%
+                  </div>
+                );
                 return (
                   <tr key={s.simbolo}>
                     <td style={{fontWeight:700,color:"var(--text)"}}>{s.simbolo}</td>
@@ -169,10 +240,10 @@ export default function Statistics() {
                     <td>{s.n_wins}</td>
                     <td>{(s.n_wins/s.n_trades*100).toFixed(1)}%</td>
                     <td style={{color:s.pl_total>=0?GREEN:RED,whiteSpace:"nowrap"}}>
-                      {naoEur ? <><strong>{fmtOrig(s.pl_total_orig, s.moeda)}</strong> <span style={{color:MUTE,fontWeight:600}}>({fmt(s.pl_total)})</span></> : <strong>{fmt(s.pl_total)}</strong>}
+                      {naoEur ? <><strong>{fmtOrig(s.pl_total_orig, s.moeda)}</strong> <span style={{color:MUTE,fontWeight:600}}>({fmt(s.pl_total)})</span>{fxLine(fxTotal)}</> : <strong>{fmt(s.pl_total)}</strong>}
                     </td>
                     <td style={{color:s.avg_pl>=0?GREEN:RED,whiteSpace:"nowrap"}}>
-                      {naoEur ? <><strong>{fmtOrig(s.avg_pl_orig, s.moeda)}</strong> <span style={{color:MUTE}}>({fmt(s.avg_pl)})</span></> : fmt(s.avg_pl)}
+                      {naoEur ? <><strong>{fmtOrig(s.avg_pl_orig, s.moeda)}</strong> <span style={{color:MUTE}}>({fmt(s.avg_pl)})</span>{fxLine(fxAvg)}</> : fmt(s.avg_pl)}
                     </td>
                   </tr>
                 );

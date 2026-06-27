@@ -89,13 +89,28 @@ router.get("/summary", (req, res) => {
     }
 
     // D) Anexo J Q8 — Dividendos e Juros
+    // EXCEÇÃO XTB: os juros 'Free-funds' da XTB são rendimento NACIONAL já tributado na
+    // fonte a 28% (sucursal portuguesa) e estão dispensados de declaração. São excluídos do
+    // Anexo J Q8 e nunca somados aos juros estrangeiros da IBKR (Irlanda). Ver cartão de
+    // "Rendimentos Dispensados" (jurosNacionaisXTB).
     const jQ8Linhas = db.prepare(`
       SELECT simbolo, data_pagamento, valor_bruto_eur, retencao_eur, valor_liq_eur,
              pais_fonte, moeda, corretora, conta, COALESCE(tipo,'DIVIDEND') AS tipo
       FROM   dividendos
       WHERE  strftime('%Y', data_pagamento) = ?
+        AND  NOT (UPPER(COALESCE(corretora,'')) = 'XTB' AND COALESCE(tipo,'DIVIDEND') = 'INTEREST')
       ORDER BY tipo ASC, pais_fonte ASC, data_pagamento ASC
     `).all(ano).map(d => ({ ...d, pais_codigo: atCode(d.pais_fonte) }));
+
+    // Juros nacionais da XTB (dispensados) — exibidos apenas a título informativo.
+    const jurosNacionaisXTB = db.prepare(`
+      SELECT simbolo, data_pagamento, valor_bruto_eur, retencao_eur, valor_liq_eur,
+             pais_fonte, moeda, corretora, conta
+      FROM   dividendos
+      WHERE  strftime('%Y', data_pagamento) = ?
+        AND  UPPER(COALESCE(corretora,'')) = 'XTB' AND COALESCE(tipo,'DIVIDEND') = 'INTEREST'
+      ORDER BY data_pagamento ASC
+    `).all(ano);
 
     // Agrupamento Q8 por país + tipo (para entrada no Portal AT)
     const q8PorPais = {};
@@ -122,6 +137,12 @@ router.get("/summary", (req, res) => {
       j_q9_2a: jQ92A,
       j_q9_2b: { trades: jQ92BRaw, por_pais: Object.values(q92bPorPais) },
       j_q8:    { linhas: jQ8Linhas, por_pais: Object.values(q8PorPais) },
+      juros_nacionais_xtb: {
+        linhas: jurosNacionaisXTB,
+        bruto_eur:    jurosNacionaisXTB.reduce((s, d) => s + (d.valor_bruto_eur || 0), 0),
+        retencao_eur: jurosNacionaisXTB.reduce((s, d) => s + (d.retencao_eur    || 0), 0),
+        liquido_eur:  jurosNacionaisXTB.reduce((s, d) => s + (d.valor_liq_eur   || 0), 0),
+      },
       j_q11: temIBKR ? {
         pais: "IE", pais_nome: "Irlanda", pais_codigo: "372",
         instituicao: "Interactive Brokers Ireland Limited",
@@ -299,6 +320,7 @@ router.get("/export", async (req, res) => {
              COALESCE(ref_externa,'—') AS ref_externa,
              moeda, corretora, COALESCE(tipo,'DIVIDEND') AS tipo
       FROM dividendos WHERE strftime('%Y',data_pagamento)=?
+        AND NOT (UPPER(COALESCE(corretora,'')) = 'XTB' AND COALESCE(tipo,'DIVIDEND') = 'INTEREST')
       ORDER BY tipo, pais_fonte, data_pagamento
     `).all(ano).map(d => ({ ...d, pais_codigo: atCode(d.pais_fonte), cod: d.tipo === "INTEREST" ? "E20" : "E21" }));
 

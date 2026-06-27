@@ -2,6 +2,7 @@
 const cors         = require("cors");
 const path         = require("path");
 const fs           = require("fs");
+const os           = require("os");
 const session      = require("express-session");
 const FileStore    = require("session-file-store")(session);
 const fx           = require("./fx");
@@ -10,7 +11,26 @@ const requireAdmin = require("./middleware/requireAdmin");
 
 const app  = express();
 const PORT = 3001;
-const SESSIONS_DIR = path.join(__dirname, "sessions");
+// IMPORTANTE: as sessões ficam FORA do OneDrive. Quando a pasta está dentro do OneDrive,
+// a sincronização bloqueia o rename atómico do session-file-store (escreve <id>.json.<rnd>
+// e renomeia para <id>.json) → erro EPERM. Sob reinícios rápidos do nodemon isso degenera
+// numa cascata de erros que acaba por derrubar o processo (login deixa de responder).
+// Guardar numa pasta local não sincronizada (LOCALAPPDATA, com fallback para o tmp) resolve.
+const SESSIONS_DIR = path.join(process.env.LOCALAPPDATA || os.tmpdir(), "trading-journal", "sessions");
+try { fs.mkdirSync(SESSIONS_DIR, { recursive: true }); } catch {}
+
+// Rede de segurança: erros transitórios de I/O do store de sessões (EPERM/ENOENT no rename
+// atómico, típicos de Windows/OneDrive) não devem derrubar o processo. Qualquer outra
+// exceção não tratada mantém o comportamento normal (log + saída).
+process.on("uncaughtException", (err) => {
+  const txt = `${err && err.path || ""} ${err && err.message || ""}`;
+  if (err && (err.code === "EPERM" || err.code === "ENOENT") && /session/i.test(txt)) {
+    console.warn("[sessões] erro de I/O transitório ignorado:", err.message);
+    return;
+  }
+  console.error("Exceção não tratada:", err);
+  process.exit(1);
+});
 
 // O session-file-store grava de forma atómica (escreve <id>.json.<random> e depois
 // renomeia para <id>.json). Em Windows o rename por vezes falha e deixa esses ficheiros
