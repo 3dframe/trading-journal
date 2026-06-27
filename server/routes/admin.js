@@ -3,6 +3,7 @@ const bcrypt   = require("bcrypt");
 const fs       = require("fs");
 const path     = require("path");
 const fx       = require("../fx");
+const { getDb } = require("../db");
 
 const router     = express.Router();
 const USERS_FILE = path.join(__dirname, "..", "users.json");
@@ -95,6 +96,34 @@ router.post("/fx/update", async (req, res) => {
     res.json(result);
   } catch (e) {
     res.status(502).json({ error: e.message });
+  }
+});
+
+// POST /api/admin/reset-data — APAGA todos os dados importados do utilizador atual
+// (operações, dividendos, depósitos, posições, valor justo e histórico de importações),
+// deixando a base de dados em branco para reimportar do zero. A conta de utilizador e as
+// taxas de câmbio NÃO são afetadas. Operação irreversível — exige o nome de utilizador
+// no corpo (campo `confirm`) como salvaguarda extra além da confirmação no cliente.
+router.post("/reset-data", (req, res) => {
+  const username = req.session.user.username;
+  if (!req.body || req.body.confirm !== username)
+    return res.status(400).json({ error: "Confirmação inválida: escreve o teu nome de utilizador para confirmar." });
+
+  try {
+    const db = getDb(username);
+    const tables = ["trades", "dividendos", "depositos", "posicoes", "fair_value", "import_history"];
+    const deleted = {};
+    db.exec("BEGIN");
+    try {
+      for (const t of tables) {
+        try { deleted[t] = db.prepare(`DELETE FROM ${t}`).run().changes; }
+        catch { deleted[t] = 0; }   // a tabela pode não existir nesta BD — ignora
+      }
+      db.exec("COMMIT");
+    } catch (e) { db.exec("ROLLBACK"); throw e; }
+    res.json({ ok: true, deleted });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

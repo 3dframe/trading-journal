@@ -132,6 +132,34 @@ function initSchema(db) {
   try { db.exec("ALTER TABLE depositos  ADD COLUMN produto            TEXT"); } catch {}
   try { db.exec("ALTER TABLE depositos  ADD COLUMN tipo_raw           TEXT"); } catch {}
 
+  // Migration: posições abertas ("Ações em Carteira"). Snapshot da secção
+  // "Open Positions" dos relatórios — substituído por (corretora, conta) a cada
+  // importação. O valor justo é manual e fica numa tabela à parte para persistir
+  // entre importações (a tabela posicoes é recriada a cada relatório).
+  try { db.exec(`CREATE TABLE IF NOT EXISTS posicoes (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    simbolo       TEXT,
+    nome          TEXT,
+    categoria     TEXT,
+    moeda         TEXT,
+    quantidade    REAL,
+    preco_medio   REAL,
+    custo_eur     REAL,
+    preco_atual   REAL,
+    valor_eur     REAL,
+    pl_eur        REAL,
+    corretora     TEXT,
+    conta         TEXT,
+    conta_nome    TEXT,
+    atualizado_em TEXT
+  )`); } catch {}
+  try { db.exec(`CREATE TABLE IF NOT EXISTS fair_value (
+    simbolo       TEXT PRIMARY KEY,
+    valor         REAL,
+    moeda         TEXT,
+    atualizado_em TEXT
+  )`); } catch {}
+
   // 3. Índices únicos (só depois de garantir que as colunas existem)
   try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_trades_ref
     ON trades(corretora, ref_externa) WHERE ref_externa IS NOT NULL`); } catch {}

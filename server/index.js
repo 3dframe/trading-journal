@@ -41,7 +41,7 @@ app.use(express.json());
 app.use(session({
   store: new FileStore({
     path: SESSIONS_DIR,
-    ttl: 7 * 24 * 60 * 60,   // 7 dias, alinhado com o maxAge do cookie
+    ttl: 24 * 60 * 60,       // sessão expira no servidor ao fim de 1 dia de inactividade
     reapInterval: 60 * 60,   // apaga sessões expiradas a cada hora
     logFn: () => {},
   }),
@@ -51,7 +51,8 @@ app.use(session({
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 dias
+    // Sem maxAge → cookie de sessão: é apagado quando o browser fecha,
+    // obrigando sempre a passar pelo login/password ao reabrir a aplicação.
   },
 }));
 

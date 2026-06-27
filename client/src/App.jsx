@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import axios from "axios";
 import Dashboard   from "./pages/Dashboard.jsx";
 import TradeLog    from "./pages/TradeLog.jsx";
@@ -9,6 +9,7 @@ import IRS         from "./pages/IRS.jsx";
 import Login       from "./pages/Login.jsx";
 import Admin       from "./pages/Admin.jsx";
 import Settings    from "./pages/Settings.jsx";
+import UserMenu     from "./components/UserMenu.jsx";
 
 axios.defaults.withCredentials = true;
 
@@ -69,32 +70,6 @@ const MenuIcon = () => (
     <line x1="3" y1="18" x2="21" y2="18"/>
   </svg>
 );
-const MoonIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-    <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
-  </svg>
-);
-const SunIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-    <circle cx="12" cy="12" r="5"/>
-    <line x1="12" y1="1"  x2="12" y2="3"/>
-    <line x1="12" y1="21" x2="12" y2="23"/>
-    <line x1="4.22" y1="4.22"  x2="5.64" y2="5.64"/>
-    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-    <line x1="1"  y1="12" x2="3"  y2="12"/>
-    <line x1="21" y1="12" x2="23" y2="12"/>
-    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
-    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
-  </svg>
-);
-const AdminIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
-    <circle cx="9" cy="7" r="4"/>
-    <path d="M23 21v-2a4 4 0 00-3-3.87"/>
-    <path d="M16 3.13a4 4 0 010 7.75"/>
-  </svg>
-);
 
 /* ── Navigation config ───────────────────────────────────── */
 const PAGES = [
@@ -117,8 +92,6 @@ export default function App() {
   const [isAdmin, setIsAdmin]         = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [cookiesOk, setCookiesOk]     = useState(() => localStorage.getItem("cookies_accepted") === "1");
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const userMenuRef = useRef(null);
 
   const navigateTo = (id) => {
     if (id === page) return;
@@ -132,16 +105,6 @@ export default function App() {
       .then(r => { setUser(r.data.username); setFullName(r.data.fullName); setIsAdmin(!!r.data.isAdmin); })
       .catch(() => { setUser(null); setFullName(null); setIsAdmin(false); })
       .finally(() => setAuthChecked(true));
-  }, []);
-
-  useEffect(() => {
-    const handler = (e) => {
-      if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
-        setUserMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
   }, []);
 
   const logout = async () => {
@@ -165,9 +128,8 @@ export default function App() {
     document.documentElement.setAttribute("data-theme", next ? "dark" : "light");
   };
 
-  const navPages = isAdmin
-    ? [...PAGES, { id: "admin", label: "Administração", icon: <AdminIcon /> }]
-    : PAGES;
+  // A navegação da sidebar já não inclui "Administração" — passou para o menu de utilizador.
+  const navPages = PAGES;
 
   const renderPage = () => {
     switch (page) {
@@ -177,7 +139,7 @@ export default function App() {
       case "statistics": return <Statistics />;
       case "import":     return <Import />;
       case "irs":        return <IRS />;
-      case "admin":      return isAdmin ? <Admin /> : <Dashboard />;
+      case "admin":      return isAdmin ? <Admin username={user} /> : <Dashboard />;
       case "settings":   return <Settings user={user} fullName={fullName} onFullNameChange={n => setFullName(n)} />;
       default:           return <Dashboard />;
     }
@@ -194,8 +156,6 @@ export default function App() {
     setHovered(false);
   };
 
-  const initials = (fullName || user)?.slice(0, 2).toUpperCase() ?? "?";
-
   return (
     <div className="layout">
 
@@ -203,7 +163,7 @@ export default function App() {
       <aside
         className={sidebarClass}
         onMouseEnter={() => collapsed && setHovered(true)}
-        onMouseLeave={() => { setHovered(false); setUserMenuOpen(false); }}
+        onMouseLeave={() => setHovered(false)}
       >
         {/* Hamburger + título */}
         <div className="sidebar-ham-area">
@@ -215,68 +175,6 @@ export default function App() {
             <MenuIcon />
           </button>
           <span className="sidebar-text sidebar-ham-title">Diário de Trading</span>
-        </div>
-
-        {/* User section */}
-        <div className="sidebar-user" ref={userMenuRef}>
-          {userMenuOpen && (
-            <div className="sidebar-user-menu">
-              <div className="sidebar-user-menu-header">
-                <div style={{ fontWeight: 700, color: "var(--text)", fontSize: "0.82rem" }}>{fullName || user}</div>
-                <div style={{ fontSize: "0.7rem", color: "var(--mute)", marginTop: 2 }}>{isAdmin ? "Administrador" : "Conta local"}</div>
-              </div>
-
-              <button className="sidebar-menu-item" onClick={toggleTheme}>
-                <span className="sidebar-menu-icon">{darkMode ? <SunIcon /> : <MoonIcon />}</span>
-                {darkMode ? "Tema Claro" : "Tema Escuro"}
-              </button>
-
-              <div className="sidebar-menu-divider" />
-
-              <button className="sidebar-menu-item" onClick={() => { setUserMenuOpen(false); navigateTo("settings"); }}>
-                <span className="sidebar-menu-icon">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="3"/>
-                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                  </svg>
-                </span>
-                Definições
-              </button>
-
-              <div className="sidebar-menu-divider" />
-
-              <button className="sidebar-menu-item sidebar-menu-item-danger" onClick={() => { setUserMenuOpen(false); logout(); }}>
-                <span className="sidebar-menu-icon">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                    <polyline points="16 17 21 12 16 7"/>
-                    <line x1="21" y1="12" x2="9" y2="12"/>
-                  </svg>
-                </span>
-                Sair
-              </button>
-            </div>
-          )}
-
-          <button
-            className="sidebar-user-btn"
-            onClick={() => setUserMenuOpen(o => !o)}
-            title={collapsed && !hovered ? (fullName || user) : undefined}
-          >
-            <div className="sidebar-user-avatar">{initials}</div>
-            <div className="sidebar-text sidebar-user-info">
-              <div className="sidebar-user-name">{fullName || user}</div>
-              <div className="sidebar-user-role">{isAdmin ? "Administrador" : "Conta local"}</div>
-            </div>
-            <svg
-              width="10" height="10" viewBox="0 0 24 24"
-              fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-              className="sidebar-text"
-              style={{ opacity: .5, flexShrink: 0, transition: "transform .2s", transform: userMenuOpen ? "rotate(180deg)" : "rotate(0deg)" }}
-            >
-              <polyline points="6 9 12 15 18 9"/>
-            </svg>
-          </button>
         </div>
 
         {/* Nav */}
@@ -305,6 +203,15 @@ export default function App() {
 
       {/* ── Right side ──────────────────────────────────── */}
       <div className={`layout-right${collapsed ? " collapsed" : ""}`}>
+        {/* Barra de topo: menu de utilizador (fixa, fora da área de scroll) */}
+        <div className="topbar">
+          <UserMenu
+            fullName={fullName} username={user} isAdmin={isAdmin}
+            darkMode={darkMode} onToggleTheme={toggleTheme}
+            onLogout={logout} onOpenSettings={() => navigateTo("settings")}
+            onOpenAdmin={isAdmin ? () => navigateTo("admin") : undefined}
+          />
+        </div>
         <main className="main-content">
           {pageLoading && (
             <div style={{

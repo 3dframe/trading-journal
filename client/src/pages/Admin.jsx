@@ -30,11 +30,18 @@ const ACTION_LABELS = {
   register:     { label: "Registo",       color: "#4f6af5" },
 };
 
-export default function Admin() {
+export default function Admin({ username }) {
   const [users, setUsers]     = useState([]);
   const [logs, setLogs]       = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState("");
+
+  // Reset à base de dados (apagar dados importados)
+  const [showReset, setShowReset]       = useState(false);
+  const [resetText, setResetText]       = useState("");
+  const [resetDataErr, setResetDataErr] = useState("");
+  const [resetDataLoad, setResetDataLoad] = useState(false);
+  const [resetDone, setResetDone]       = useState(null);
 
   const [showForm, setShowForm] = useState(false);
   const [newUser, setNewUser]   = useState({ username: "", password: "", isAdmin: false });
@@ -89,6 +96,22 @@ export default function Admin() {
       load();
     } catch (err) {
       alert(err.response?.data?.error || "Erro ao eliminar.");
+    }
+  };
+
+  const resetData = async () => {
+    setResetDataErr("");
+    setResetDataLoad(true);
+    try {
+      const { data } = await axios.post("/api/admin/reset-data", { confirm: resetText });
+      const total = Object.values(data.deleted || {}).reduce((s, n) => s + n, 0);
+      setResetDone(`Base de dados limpa — ${total} registos apagados. Já podes reimportar do início.`);
+      setShowReset(false);
+      setResetText("");
+    } catch (err) {
+      setResetDataErr(err.response?.data?.error || "Erro ao apagar dados.");
+    } finally {
+      setResetDataLoad(false);
     }
   };
 
@@ -323,6 +346,37 @@ export default function Admin() {
           )}
         </div>
 
+        {/* ── Zona de Perigo ── */}
+        <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#f43f5e", textTransform: "uppercase",
+          letterSpacing: ".08em", marginTop: 32, marginBottom: 10 }}>
+          Zona de Perigo
+        </div>
+        <div style={{
+          background: "rgba(244,63,94,0.06)", border: "1px solid rgba(244,63,94,0.35)",
+          borderRadius: 12, padding: "18px 22px",
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap",
+        }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: "0.88rem", color: "var(--text)" }}>Apagar todos os dados importados</div>
+            <div style={{ fontSize: "0.76rem", color: "var(--mute)", marginTop: 3, lineHeight: 1.5 }}>
+              Remove operações, dividendos, depósitos, posições em carteira, valores justos e o histórico de
+              importações. A base de dados fica em branco para reimportares do início. A tua conta e os câmbios
+              do BCE não são afetados. <strong style={{ color: "#f43f5e" }}>Ação irreversível.</strong>
+            </div>
+          </div>
+          <button onClick={() => { setShowReset(true); setResetText(""); setResetDataErr(""); setResetDone(null); }}
+            style={{ flexShrink: 0, background: "#f43f5e", border: "none", borderRadius: 8,
+              padding: "9px 16px", cursor: "pointer", fontSize: "0.8rem", fontWeight: 700, color: "#fff" }}>
+            Apagar tudo
+          </button>
+        </div>
+        {resetDone && (
+          <div style={{ marginTop: 12, fontSize: "0.82rem", color: "#22c55e",
+            background: "rgba(34,197,94,0.08)", borderRadius: 8, padding: "10px 14px" }}>
+            ✅ {resetDone}
+          </div>
+        )}
+
       </>)}
 
       {/* Reset password modal */}
@@ -368,6 +422,56 @@ export default function Admin() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de confirmação severa do reset à BD */}
+      {showReset && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+        }} onClick={() => setShowReset(false)}>
+          <div style={{
+            background: "var(--card)", border: "1px solid rgba(244,63,94,0.5)",
+            borderRadius: 14, padding: "28px 32px", width: "100%", maxWidth: 460,
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "#f43f5e", marginBottom: 10 }}>
+              ⚠️ Apagar todos os dados
+            </div>
+            <div style={{ fontSize: "0.82rem", color: "var(--text)", marginBottom: 8, lineHeight: 1.6 }}>
+              Esta ação <strong>apaga permanentemente</strong> todas as operações, dividendos, depósitos,
+              posições em carteira, valores justos e o histórico de importações.
+              <strong style={{ color: "#f43f5e" }}> Não pode ser revertida.</strong>
+            </div>
+            <div style={{ fontSize: "0.78rem", color: "var(--mute)", marginBottom: 14 }}>
+              Para confirmar, escreve o teu nome de utilizador: <strong style={{ color: "var(--text)" }}>{username}</strong>
+            </div>
+            <input
+              autoFocus value={resetText} onChange={e => setResetText(e.target.value)} placeholder={username}
+              onKeyDown={e => { if (e.key === "Enter" && resetText === username && !resetDataLoad) resetData(); }}
+              style={{ width: "100%", boxSizing: "border-box", marginBottom: 14 }}
+            />
+            {resetDataErr && (
+              <div style={{ fontSize: "0.78rem", color: "#f43f5e",
+                background: "rgba(244,63,94,0.08)", borderRadius: 8, padding: "8px 12px", marginBottom: 14 }}>
+                {resetDataErr}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button type="button" onClick={() => setShowReset(false)}
+                style={{ background: "transparent", border: "1px solid var(--border)", borderRadius: 8,
+                  padding: "8px 16px", cursor: "pointer", fontSize: "0.82rem", color: "var(--mute)", fontWeight: 600 }}>
+                Cancelar
+              </button>
+              <button type="button" onClick={resetData} disabled={resetDataLoad || resetText !== username}
+                style={{ background: resetText === username ? "#f43f5e" : "var(--border)", border: "none",
+                  borderRadius: 8, padding: "8px 16px", fontSize: "0.82rem", color: "#fff", fontWeight: 700,
+                  cursor: resetText === username ? "pointer" : "not-allowed",
+                  opacity: resetText === username ? 1 : 0.6 }}>
+                {resetDataLoad ? "A apagar..." : "Apagar definitivamente"}
+              </button>
+            </div>
           </div>
         </div>
       )}

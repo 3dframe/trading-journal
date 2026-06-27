@@ -13,8 +13,35 @@ const fmt = v =>
 const fmtAbs = v =>
   "€ " + Math.abs(v).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// Formata um valor na moeda nativa do ativo (preço/preço médio das posições abertas).
+const CUR_SYMBOL = { USD: "US$ ", EUR: "€ ", GBP: "£ ", CHF: "CHF ", CAD: "C$ ", JPY: "¥ ", AUD: "A$ " };
+const fmtCur = (v, moeda) => {
+  if (v == null) return "—";
+  const sym = CUR_SYMBOL[moeda] || (moeda ? moeda + " " : "");
+  return sym + Number(v).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+
 const GREEN = "#10b981", RED = "#f43f5e", BLUE = "#60a5fa",
       PINK = "#f472b6", AMBER = "#fbbf24", PURPLE = "#a78bfa", TEAL = "#14b8a6", MUTE = "#6b7280";
+
+// Metadados das categorias de trades conhecidas (rótulo PT, cor e emoji).
+// As categorias são detetadas automaticamente a partir dos dados — se aparecer
+// uma categoria nova no relatório (ex.: FUTURE), o card mostra-a na mesma,
+// usando o rótulo/cor/emoji por defeito (ver prettyCat / CAT_FALLBACK_COLORS).
+const CAT_META = {
+  STOCK:  { label: "Ações",      color: BLUE,      emoji: "📈" },
+  OPTION: { label: "Opções",     color: PINK,      emoji: "🎯" },
+  CFD:    { label: "CFDs",       color: AMBER,     emoji: "⚡" },
+  FUTURE: { label: "Futuros",    color: PURPLE,    emoji: "📊" },
+  FUT:    { label: "Futuros",    color: PURPLE,    emoji: "📊" },
+  FOREX:  { label: "Forex",      color: "#22d3ee", emoji: "💱" },
+  CRYPTO: { label: "Cripto",     color: "#f59e0b", emoji: "₿" },
+  BOND:   { label: "Obrigações", color: "#94a3b8", emoji: "📜" },
+};
+// Cores atribuídas por ordem de aparição a categorias sem entrada em CAT_META.
+const CAT_FALLBACK_COLORS = ["#a78bfa", "#22d3ee", "#fb7185", "#34d399", "#facc15", "#c084fc", "#fb923c"];
+// Rótulo legível para uma categoria não mapeada: "FUTURE" → "Future".
+const prettyCat = cat => !cat ? "Outros" : cat.charAt(0).toUpperCase() + cat.slice(1).toLowerCase();
 
 const COUNTRY_NAME = {
   PT:"Portugal", US:"Estados Unidos", NL:"Países Baixos", DE:"Alemanha",
@@ -232,12 +259,17 @@ export default function Dashboard({ user }) {
   const [ano, setAno]             = useState(null);
   const [stats, setStats]         = useState(null);
   const [bySymbol, setBySymbol]   = useState([]);
+  const [holdings, setHoldings]   = useState([]);
+  const [fvEdit, setFvEdit]       = useState(null);   // edição do valor justo: { simbolo, valor }
   const [allTrades, setAllTrades] = useState([]);
   const [allDivs, setAllDivs]     = useState([]);
   const [divTotal, setDivTotal]   = useState(null);
   const [deposits, setDeposits]   = useState([]);
   const [equityAll, setEquityAll] = useState([]);   // equity acumulada desde sempre
+  const [eqDetail, setEqDetail]   = useState({ categories: [], series: [] }); // equity acumulada por categoria
   const [eqRange, setEqRange]     = useState("MAX"); // 1D|5D|6M|YTD|1A|3A|5A|10A|MAX
+  const [perfTab, setPerfTab]     = useState("value");     // value | market (market = brevemente)
+  const [chartMode, setChartMode] = useState("combined");  // combined | stacked
   const [modal, setModal]               = useState(null);
   const [modalStack, setModalStack]     = useState([]);   // histórico para voltar atrás entre modais
   const [loading, setLoading]           = useState(true);
@@ -286,7 +318,22 @@ export default function Dashboard({ user }) {
     }).catch(() => setLoading(false)).finally(() => setAnosReady(true));
     axios.get("/api/import/deposits").then(r => setDeposits(r.data)).catch(() => {});
     axios.get("/api/trades/equity").then(r => setEquityAll(r.data)).catch(() => {}); // sem ?ano = desde início
+    axios.get("/api/trades/equity-detailed").then(r => setEqDetail(r.data)).catch(() => {}); // por categoria
+    loadHoldings(); // posições abertas (não dependem do ano)
   }, []);
+
+  // Recarrega as "Ações em Carteira" (posições abertas). Usado no arranque e após
+  // editar o valor justo manual de um símbolo.
+  const loadHoldings = useCallback(() => {
+    axios.get("/api/trades/holdings").then(r => setHoldings(r.data)).catch(() => {});
+  }, []);
+
+  // Edição inline do Valor Justo (manual). fvEdit = { simbolo, valor } ou null.
+  const saveFairValue = async (simbolo, valor, moeda) => {
+    try { await axios.post("/api/trades/fair-value", { simbolo, valor, moeda }); } catch { /* ignora */ }
+    setFvEdit(null);
+    loadHoldings();
+  };
 
   const load = useCallback(async (a) => {
     if (!a) return;
@@ -438,10 +485,8 @@ export default function Dashboard({ user }) {
   const divLiq      = divTotal?.total_liq ?? 0;
   const interestLiq  = allDivs.filter(d => d.tipo === "INTEREST").reduce((s, d) => s + (d.valor_liq_eur ?? 0), 0);
   const dividendsLiq = allDivs.filter(d => d.tipo !== "INTEREST").reduce((s, d) => s + (d.valor_liq_eur ?? 0), 0);
-  const totalIncome = (stats.net_pl ?? 0) + divLiq;
   const expectancy  = stats.n_trades > 0 ? (stats.net_pl ?? 0) / stats.n_trades : 0;
   const top10sym    = [...bySymbol].filter(s => Math.abs(s.pl_total) > 0.001).sort((a, b) => a.pl_total - b.pl_total);
-  const recent      = allTrades.slice(0, 8);
 
   const catStats = (cat) => {
     const trades = allTrades.filter(t => t.categoria === cat);
@@ -449,34 +494,39 @@ export default function Dashboard({ user }) {
     const wins   = trades.filter(t => t.pl_eur > 0).length;
     return { trades, pl, n: trades.length, wr: trades.length > 0 ? wins / trades.length * 100 : 0 };
   };
-  const stockSt  = catStats("STOCK");
-  const cfdSt    = catStats("CFD");
-  const optionSt = catStats("OPTION");
+  // ── Categorias de trades detetadas automaticamente a partir dos dados ──
+  // Em vez de uma lista fixa (STOCK/OPTION/CFD), percorremos as categorias
+  // realmente presentes em allTrades. Assim, basta o relatório trazer uma
+  // categoria nova (ex.: FUTURE) para ela aparecer no card sem alterar código.
+  let _fallbackColorIdx = 0;
+  const tradeCats = [...new Set(allTrades.map(t => t.categoria || "OUTROS"))]
+    .map(cat => {
+      const st    = catStats(cat);
+      const meta  = CAT_META[cat] || {};
+      const color = meta.color || CAT_FALLBACK_COLORS[_fallbackColorIdx++ % CAT_FALLBACK_COLORS.length];
+      const label = meta.label || prettyCat(cat);
+      const emoji = meta.emoji || "📂";
+      return { label, color, value: st.pl, n: st.n, onClick: () => openCategory(cat, label, emoji) };
+    })
+    .filter(c => c.n > 0)
+    .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
 
-  // % of total absolute P&L each category contributes (dividendos e juros separados)
-  const allCatAbs = Math.abs(stockSt.pl) + Math.abs(cfdSt.pl) + Math.abs(optionSt.pl) + Math.abs(dividendsLiq) + Math.abs(interestLiq);
-  const catPct    = val => allCatAbs > 0 ? Math.abs(val) / allCatAbs * 100 : 0;
+  // Dividendos e Juros vêm de allDivs (não de allTrades) — entram como categorias próprias.
   const nDividendos = allDivs.filter(d => d.tipo !== "INTEREST").length;
   const nJuros      = allDivs.filter(d => d.tipo === "INTEREST").length;
-  const catDonuts = [
-    { pct: catPct(stockSt.pl),    label: "Ações",      color: BLUE,  onClick: () => openCategory("STOCK", "Ações", "📈"),  value: stockSt.pl,    show: stockSt.n > 0 },
-    { pct: catPct(optionSt.pl),   label: "Opções",     color: PINK,  onClick: () => openCategory("OPTION", "Opções", "🎯"), value: optionSt.pl,   show: optionSt.n > 0 },
-    { pct: catPct(cfdSt.pl),      label: "CFDs",       color: AMBER, onClick: () => openCategory("CFD", "CFDs", "⚡"),      value: cfdSt.pl,      show: cfdSt.n > 0 },
-    { pct: catPct(dividendsLiq),  label: "Dividendos", color: GREEN, onClick: openDivs,                                     value: dividendsLiq,  show: dividendsLiq !== 0 },
-    { pct: catPct(interestLiq),   label: "Juros",      color: TEAL,  onClick: openInterest,                                 value: interestLiq,   show: interestLiq !== 0 },
+  const incomeCats  = [
+    { label: "Dividendos", color: GREEN, value: dividendsLiq, onClick: openDivs,     show: dividendsLiq !== 0 },
+    { label: "Juros",      color: TEAL,  value: interestLiq,  onClick: openInterest, show: interestLiq !== 0 },
   ].filter(c => c.show);
 
-  // Repartição para o donut dedicado (Ações, Opções, CFDs, Dividendos, Juros).
+  // Repartição completa (trades + rendimento) — partilhada pelo donut dedicado
+  // "Repartição por Categoria" e pelo card "Categorias" (mini-donuts).
   // Fatias dimensionadas pelo valor absoluto; legenda mostra o valor com sinal e a % do total absoluto.
-  const catBreakdown = [
-    { label: "Ações",      value: stockSt.pl,   color: BLUE,  onClick: () => openCategory("STOCK", "Ações", "📈"),   show: stockSt.n > 0 },
-    { label: "Opções",     value: optionSt.pl,  color: PINK,  onClick: () => openCategory("OPTION", "Opções", "🎯"), show: optionSt.n > 0 },
-    { label: "CFDs",       value: cfdSt.pl,     color: AMBER, onClick: () => openCategory("CFD", "CFDs", "⚡"),       show: cfdSt.n > 0 },
-    { label: "Dividendos", value: dividendsLiq, color: GREEN, onClick: openDivs,                                     show: dividendsLiq !== 0 },
-    { label: "Juros",      value: interestLiq,  color: TEAL,  onClick: openInterest,                                 show: interestLiq !== 0 },
-  ].filter(c => c.show);
+  const catBreakdown    = [...tradeCats, ...incomeCats];
   const catBreakdownAbs = catBreakdown.reduce((s, c) => s + Math.abs(c.value), 0);
   const catBreakdownNet = catBreakdown.reduce((s, c) => s + c.value, 0);
+  const catPct          = val => catBreakdownAbs > 0 ? Math.abs(val) / catBreakdownAbs * 100 : 0;
+  const catDonuts       = catBreakdown.map(c => ({ ...c, pct: catPct(c.value) }));
 
   // Série da curva de equity: sempre a série acumulada desde sempre, filtrada pelo
   // intervalo escolhido (janela ancorada à data mais recente dos dados).
@@ -510,46 +560,57 @@ export default function Dashboard({ user }) {
     .filter(d => d.tipo === "deposito")
     .reduce((acc, d) => { acc[d.corretora] = (acc[d.corretora] || 0) + d.valor; return acc; }, {});
 
+  // ── Métricas do card "Total Acumulado" (estilo carteira) ──
+  // Base de custo = capital líquido injetado (depósitos − levantamentos).
+  const costBasis = deposits.reduce((s, d) =>
+    s + (d.tipo === "deposito" ? (d.valor || 0) : d.tipo === "levantamento" ? -(d.valor || 0) : 0), 0);
+  // Resultado realizado acumulado (todas as contas, desde sempre) = último ponto da equity.
+  const realizedAll   = equityAll.length ? equityAll[equityAll.length - 1].equity : 0;
+  // Valor da carteira = capital injetado + resultado acumulado.
+  const portfolioValue = costBasis + realizedAll;
+  // Retorno total sobre o capital.
+  const totalReturnPct = costBasis > 0 ? realizedAll / costBasis * 100 : 0;
+  // Retorno do último dia com movimento (delta da equity) e % sobre o valor da carteira na véspera.
+  const lastEqDelta = equityAll.length >= 2
+    ? equityAll[equityAll.length - 1].equity - equityAll[equityAll.length - 2].equity
+    : (equityAll.length === 1 ? equityAll[0].equity : 0);
+  const prevPortfolio = costBasis + (equityAll.length >= 2 ? equityAll[equityAll.length - 2].equity : 0);
+  const oneDayPct     = prevPortfolio > 0 ? lastEqDelta / prevPortfolio * 100 : 0;
+  // Nº de contas distintas (proxy para "participações" — não há posições abertas).
+  const nContas = new Set([
+    ...allTrades.map(t => t.conta).filter(Boolean),
+    ...deposits.map(d => d.conta).filter(Boolean),
+  ]).size;
+  // TIR anualizada (CAGR) sobre o período investido — retorno anualizado do capital.
+  const annualisedPct = (() => {
+    if (costBasis <= 0 || portfolioValue <= 0 || equityAll.length === 0) return null;
+    const firstDay = equityAll[0].dia, lastDay = equityAll[equityAll.length - 1].dia;
+    const years = (new Date(lastDay) - new Date(firstDay)) / (365.25 * 24 * 3600 * 1000);
+    if (years < 0.08) return totalReturnPct;     // período demasiado curto → usa o retorno total
+    return (Math.pow(portfolioValue / costBasis, 1 / years) - 1) * 100;
+  })();
+  // Retorno da carteira na janela escolhida (para a legenda junto ao gráfico).
+  const rangeStartEq   = eqData.length ? eqData[0].equity : 0;
+  const rangeDelta     = (eqData.length ? eqData[eqData.length - 1].equity : 0) - rangeStartEq;
+  const rangeReturnPct = (costBasis + rangeStartEq) !== 0 ? rangeDelta / (costBasis + rangeStartEq) * 100 : 0;
+  // Série por categoria filtrada pela mesma janela (modo "Empilhado").
+  const eqDetailData = eqStart ? eqDetail.series.filter(p => p.dia >= eqStart) : eqDetail.series;
+  // Categorias presentes, com cor/rótulo (reaproveita CAT_META).
+  const eqStackCats = (eqDetail.categories || []).map(cat => ({
+    key: cat,
+    label: CAT_META[cat]?.label || prettyCat(cat),
+    color: CAT_META[cat]?.color || CAT_FALLBACK_COLORS[(eqDetail.categories.indexOf(cat)) % CAT_FALLBACK_COLORS.length],
+  }));
+  const pctTxt = v => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}%`;
+  // Valor de mercado total da carteira (base para o "Peso" de cada posição).
+  const holdingsTotalValue = holdings.reduce((s, h) => s + (h.valor_eur || 0), 0);
+
   return (
-    <div style={{ height: "calc(100vh - 56px)", display: "flex", flexDirection: "column" }}>
+    <div style={{ height: "calc(100vh - 56px - var(--topbar-h))", display: "flex", flexDirection: "column" }}>
       {/* ── Header fixo (sempre visível) ── */}
-      <div className="page-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
-        <div>
-          <div className="page-title">Visão Geral</div>
-          <div className="page-sub">Resumo do desempenho e da sua atividade de trading</div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <button
-          onClick={openAllMovimentos}
-          style={{
-            background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.35)",
-            color: "#60a5fa", borderRadius: 8, padding: "7px 14px",
-            fontSize: "0.78rem", fontWeight: 700, cursor: "pointer",
-            display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
-            transition: "background .15s",
-          }}
-          onMouseEnter={e => e.currentTarget.style.background = "rgba(96,165,250,0.22)"}
-          onMouseLeave={e => e.currentTarget.style.background = "rgba(96,165,250,0.12)"}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
-            <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
-          </svg>
-          Ver Movimentos
-        </button>
-        <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-            style={{ position: "absolute", left: 10, pointerEvents: "none", flexShrink: 0 }}>
-            <rect x="3" y="4" width="18" height="18" rx="2"/>
-            <line x1="16" y1="2" x2="16" y2="6"/>
-            <line x1="8"  y1="2" x2="8"  y2="6"/>
-            <line x1="3"  y1="10" x2="21" y2="10"/>
-          </svg>
-          <select value={ano ?? ""} onChange={e => setAno(Number(e.target.value))} style={{ paddingLeft: 32 }}>
-            {anos.map(a => <option key={a} value={a}>{a}</option>)}
-          </select>
-        </div>
-        </div>
+      <div className="page-header" style={{ flexShrink: 0 }}>
+        <div className="page-title">Visão Geral</div>
+        <div className="page-sub">Resumo do desempenho e da sua atividade de trading</div>
       </div>
 
       {/* ── Conteúdo com scroll ── */}
@@ -567,91 +628,125 @@ export default function Dashboard({ user }) {
 
       {/* ── Total Acumulado + Repartição por categoria (lado a lado) ── */}
       <div style={{ display: "flex", gap: 16, marginBottom: 20, alignItems: "stretch" }}>
-      <div className="card" style={{ padding: 24, display: "flex", gap: 24, flex: 1, minWidth: 0 }}>
+      <div className="card" style={{ padding: 22, display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
 
-          {/* Info column */}
-          <div style={{ width: 210, flexShrink: 0, display: "flex", flexDirection: "column" }}>
-            {/* Título */}
-            <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "var(--text)", marginBottom: 2 }}>Total Acumulado</div>
-            <div style={{ fontSize: "0.72rem", color: MUTE, marginBottom: 16 }}>
-              Ano {ano}
-            </div>
+          {/* ── Tabs: Valor ao longo do tempo · Desempenho vs Mercado ── */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+            {[
+              { id: "value",  label: "Valor ao Longo do Tempo", enabled: true },
+              { id: "market", label: "Desempenho vs Mercado",   enabled: false },
+            ].map(t => {
+              const active = perfTab === t.id;
+              return (
+                <button key={t.id}
+                  onClick={() => t.enabled && setPerfTab(t.id)}
+                  disabled={!t.enabled}
+                  title={t.enabled ? undefined : "Disponível em breve — requer dados de um índice de referência"}
+                  style={{
+                    padding: "8px 14px", borderRadius: 9, fontSize: "0.78rem", fontFamily: "var(--font)",
+                    fontWeight: 700, whiteSpace: "nowrap",
+                    cursor: t.enabled ? "pointer" : "not-allowed", opacity: t.enabled ? 1 : 0.45,
+                    border: `1px solid ${active ? "rgba(96,165,250,0.45)" : "var(--border)"}`,
+                    background: active ? "rgba(96,165,250,0.16)" : "transparent",
+                    color: active ? "#60a5fa" : MUTE, transition: "background .15s",
+                  }}
+                >
+                  {t.label}{!t.enabled && <span style={{ fontSize: "0.62rem", marginLeft: 6, opacity: 0.8 }}>(brevemente)</span>}
+                </button>
+              );
+            })}
+          </div>
 
-            {/* P&L total + PF */}
-            <div style={{ marginBottom: 12, display: "flex", alignItems: "flex-end", gap: 10 }}>
-              <div style={{ fontSize: "1.55rem", fontWeight: 800, letterSpacing: "-0.5px", color: totalIncome >= 0 ? GREEN : RED }}>
-                {fmtAbs(totalIncome)}
-              </div>
-              <span style={{ color: totalIncome >= 0 ? GREEN : RED, fontSize: "0.72rem", fontWeight: 700, opacity: 0.75 }}>
-                {pf.toFixed(2)}x PF
-              </span>
-            </div>
-
-            {/* Max Drawdown */}
-            <div style={{ marginBottom: 18, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-              <span style={{ fontSize: "0.72rem", color: MUTE }}>Max Drawdown</span>
-              <span style={{ fontSize: "0.9rem", fontWeight: 700, color: RED }}>−{fmtAbs(maxDrawdown)}</span>
-            </div>
-
-            {/* Depósitos por corretora */}
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-              <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "var(--text)", marginBottom: 10 }}>Total de Depósitos</div>
-              {Object.keys(depositsByBroker).length > 0 ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                  {Object.entries(depositsByBroker).map(([broker, total]) => (
-                    <div key={broker} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                      <span style={{ fontSize: "0.9rem", color: MUTE }}>{broker}</span>
-                      <span style={{ fontSize: "0.9rem", fontWeight: 700, color: "var(--text)" }}>{fmtAbs(total)}</span>
-                    </div>
-                  ))}
+          {/* ── 4 painéis de métricas ── */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 0, marginBottom: 20, borderBottom: "1px solid var(--border)", paddingBottom: 18 }}>
+            {[
+              { value: fmtAbs(portfolioValue), valColor: "var(--text)", label: `Valor Total · ${nContas} ${nContas === 1 ? "conta" : "contas"}`, sub: null },
+              { value: fmt(lastEqDelta), valColor: lastEqDelta >= 0 ? GREEN : RED, label: "Retornos 1D", sub: pctTxt(oneDayPct), subColor: lastEqDelta >= 0 ? GREEN : RED },
+              { value: fmt(realizedAll), valColor: realizedAll >= 0 ? GREEN : RED, label: "Retornos Totais", sub: pctTxt(totalReturnPct), subColor: realizedAll >= 0 ? GREEN : RED },
+              { value: annualisedPct == null ? "—" : pctTxt(annualisedPct), valColor: (annualisedPct ?? 0) >= 0 ? GREEN : RED, label: "TIR Anualizada", sub: null },
+            ].map((m, i) => (
+              <div key={i} style={{ flex: "1 1 150px", minWidth: 130, paddingRight: 16, borderRight: i < 3 ? "1px solid var(--border)" : "none", paddingLeft: i > 0 ? 16 : 0 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: "1.35rem", fontWeight: 800, letterSpacing: "-0.5px", color: m.valColor }}>{m.value}</span>
+                  {m.sub && <span style={{ fontSize: "0.74rem", fontWeight: 700, color: m.subColor }}>{m.sub}</span>}
                 </div>
-              ) : (
-                <div style={{ fontSize: "0.68rem", color: MUTE }}>Sem depósitos registados</div>
-              )}
-            </div>
-
-            {/* Linha tracejada + explicação PF */}
-            <div style={{ marginTop: "auto", paddingTop: 12, borderTop: "1px dashed rgba(255,255,255,0.1)" }}>
-              <div style={{ fontSize: "0.68rem", color: MUTE, lineHeight: 1.6 }}>
-                <strong style={{ color: "var(--text)" }}>Profit Factor</strong> é o rácio entre ganhos e perdas totais. Valor acima de 1 significa estratégia lucrativa.
+                <div style={{ fontSize: "0.7rem", color: MUTE, marginTop: 4, fontWeight: 500 }}>{m.label}</div>
               </div>
+            ))}
+          </div>
+
+          {/* ── Valor da carteira / Base de custo (esq.) + intervalos (dir.) ── */}
+          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 26 }}>
+              <div>
+                <div style={{ fontSize: "0.66rem", color: MUTE, fontWeight: 600, marginBottom: 3 }}>Valor da Carteira</div>
+                <div style={{ fontSize: "1.05rem", fontWeight: 800, color: "var(--text)" }}>{fmtAbs(portfolioValue)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: "0.66rem", color: MUTE, fontWeight: 600, marginBottom: 3 }}>Base de Custo</div>
+                <div style={{ fontSize: "1.05rem", fontWeight: 800, color: MUTE }}>{fmtAbs(costBasis)}</div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              {EQ_RANGES.map(([k, label]) => {
+                const active = eqRange === k;
+                const base  = active ? "rgba(96,165,250,0.18)" : "rgba(255,255,255,0.04)";
+                const hover = active ? "rgba(96,165,250,0.28)" : "rgba(255,255,255,0.08)";
+                return (
+                  <button key={k} onClick={() => setEqRange(k)} style={{
+                    padding: "4px 9px", borderRadius: 7, fontSize: "0.66rem", fontWeight: active ? 700 : 600,
+                    cursor: "pointer", whiteSpace: "nowrap", fontFamily: "var(--font)",
+                    border: `1px solid ${active ? "rgba(96,165,250,0.45)" : "var(--border)"}`,
+                    background: base, color: active ? "#60a5fa" : MUTE,
+                    transition: "background .15s, transform .15s",
+                  }}
+                    onMouseEnter={e => { e.currentTarget.style.background = hover; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = base;  e.currentTarget.style.transform = "translateY(0)"; }}
+                  >{label}</button>
+                );
+              })}
             </div>
           </div>
 
-          {/* Chart column */}
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-              <div style={{ fontSize: "0.6rem", fontWeight: 700, color: MUTE, textTransform: "uppercase", letterSpacing: ".1em" }}>Curva de Equity</div>
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                {EQ_RANGES.map(([k, label]) => {
-                  const active = eqRange === k;
-                  const base  = active ? "rgba(96,165,250,0.18)" : "rgba(255,255,255,0.04)";
-                  const hover = active ? "rgba(96,165,250,0.28)" : "rgba(255,255,255,0.08)";
-                  return (
-                    <button key={k} onClick={() => setEqRange(k)} style={{
-                      padding: "4px 9px", borderRadius: 7, fontSize: "0.66rem", fontWeight: active ? 700 : 600,
-                      cursor: "pointer", whiteSpace: "nowrap", fontFamily: "var(--font)",
-                      border: `1px solid ${active ? "rgba(96,165,250,0.45)" : "var(--border)"}`,
-                      background: base, color: active ? "#60a5fa" : MUTE,
-                      transition: "background .15s, transform .15s",
-                    }}
-                      onMouseEnter={e => { e.currentTarget.style.background = hover; e.currentTarget.style.transform = "translateY(-1px)"; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = base;  e.currentTarget.style.transform = "translateY(0)"; }}
-                    >{label}</button>
-                  );
-                })}
-              </div>
-            </div>
-            <div style={{ flex: 1, minHeight: 220 }}>
-              <ResponsiveContainer width="100%" height="100%">
+          {/* ── Legenda: retorno da carteira na janela + mercado (n/d) ── */}
+          <div style={{ display: "flex", gap: 18, marginBottom: 6, fontSize: "0.72rem" }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ width: 14, height: 3, borderRadius: 2, background: rangeReturnPct >= 0 ? GREEN : RED }} />
+              <span style={{ color: MUTE }}>Carteira</span>
+              <span style={{ fontWeight: 700, color: rangeReturnPct >= 0 ? GREEN : RED }}>{pctTxt(rangeReturnPct)}</span>
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 6, opacity: 0.5 }}>
+              <span style={{ width: 14, height: 3, borderRadius: 2, background: MUTE }} />
+              <span style={{ color: MUTE }}>Mercado</span>
+              <span style={{ color: MUTE }}>n/d</span>
+            </span>
+          </div>
+
+          {/* ── Gráfico (combinado ou empilhado) ── */}
+          <div style={{ flex: 1, minHeight: 230 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              {chartMode === "stacked" ? (
+                <AreaChart data={eqDetailData}>
+                  <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+                  <XAxis dataKey="dia" tick={{ fill: MUTE, fontSize: 9 }} tickFormatter={d => d?.slice(5)} interval="preserveStartEnd" minTickGap={28} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: MUTE, fontSize: 9 }} tickFormatter={v => `€${v}`} width={46} axisLine={false} tickLine={false} />
+                  <Tooltip
+                    formatter={(v, n) => [fmt(v), CAT_META[n]?.label || prettyCat(n)]}
+                    contentStyle={{ background: "#252530", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 12 }}
+                    labelStyle={{ color: MUTE }}
+                  />
+                  <ReferenceLine y={0} stroke="rgba(255,255,255,0.25)" strokeDasharray="3 3" />
+                  {eqStackCats.map(c => (
+                    <Area key={c.key} type="monotone" dataKey={c.key} stackId="eq" stroke={c.color} fill={c.color} fillOpacity={0.5} strokeWidth={1.5} dot={false} />
+                  ))}
+                </AreaChart>
+              ) : (
                 <AreaChart data={eqData}>
                   <defs>
-                    {/* Linha: verde acima do zero, vermelho abaixo */}
                     <linearGradient id="eqStroke" x1="0" y1="0" x2="0" y2="1">
                       <stop offset={eqOff} stopColor="#10b981" stopOpacity={1} />
                       <stop offset={eqOff} stopColor="#f43f5e" stopOpacity={1} />
                     </linearGradient>
-                    {/* Preenchimento: verde esbatido acima, vermelho esbatido abaixo */}
                     <linearGradient id="eqArea" x1="0" y1="0" x2="0" y2="1">
                       <stop offset={0}     stopColor="#10b981" stopOpacity={0.35} />
                       <stop offset={eqOff} stopColor="#10b981" stopOpacity={0.04} />
@@ -670,11 +765,27 @@ export default function Dashboard({ user }) {
                   <ReferenceLine y={0} stroke="rgba(255,255,255,0.25)" strokeDasharray="3 3" />
                   <Area type="monotone" dataKey="equity" stroke="url(#eqStroke)" strokeWidth={2} fill="url(#eqArea)" dot={false} activeDot={{ r: 3 }} />
                 </AreaChart>
-              </ResponsiveContainer>
-            </div>
-            <div style={{ fontSize: "0.62rem", color: MUTE, marginTop: 8, lineHeight: 1.5 }}>
-              Evolução acumulada do resultado das operações ({EQ_RANGE_LABEL[eqRange]}) — não inclui dividendos/juros.
-            </div>
+              )}
+            </ResponsiveContainer>
+          </div>
+
+          {/* ── Toggle Empilhado / Combinado ── */}
+          <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
+            {[
+              { id: "stacked",  label: "Empilhado" },
+              { id: "combined", label: "Combinado" },
+            ].map(m => {
+              const active = chartMode === m.id;
+              return (
+                <button key={m.id} onClick={() => setChartMode(m.id)} style={{
+                  padding: "6px 14px", borderRadius: 8, fontSize: "0.72rem", fontWeight: 700,
+                  cursor: "pointer", fontFamily: "var(--font)",
+                  border: `1px solid ${active ? "rgba(96,165,250,0.45)" : "var(--border)"}`,
+                  background: active ? "rgba(96,165,250,0.16)" : "transparent",
+                  color: active ? "#60a5fa" : MUTE, transition: "background .15s",
+                }}>{m.label}</button>
+              );
+            })}
           </div>
         </div>
 
@@ -971,33 +1082,134 @@ export default function Dashboard({ user }) {
         </div>
       </div>
 
-      {/* ── Recent trades ── */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-        <div style={{ fontSize: "0.64rem", fontWeight: 700, color: MUTE, textTransform: "uppercase", letterSpacing: ".1em" }}>Últimas Trades</div>
-        <button
-          onClick={openAllTrades}
-          style={{
-            background: "rgba(96,165,250,0.12)", border: "1px solid rgba(96,165,250,0.3)",
-            borderRadius: 8, padding: "6px 14px", cursor: "pointer",
-            fontSize: "0.72rem", fontWeight: 700, color: "#fff",
-            transition: "background .15s",
-          }}
-          onMouseEnter={e => e.currentTarget.style.background = "rgba(96,165,250,0.22)"}
-          onMouseLeave={e => e.currentTarget.style.background = "rgba(96,165,250,0.12)"}
-        >
-          Ver todas ({stats.n_trades})
-        </button>
+      {/* ── Ações em Carteira (posições abertas) ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+        <span style={{ fontSize: "1.05rem", fontWeight: 800, color: "var(--text)" }}>Ações em Carteira</span>
+        <span style={{ background: "var(--hover)", color: MUTE, fontSize: "0.72rem", fontWeight: 700, borderRadius: 20, padding: "2px 10px" }}>{holdings.length}</span>
       </div>
-      {recent.map(t => (
-        <div key={t.id} className="trade-row" style={{ cursor: "pointer" }} onClick={() => openSymbolHistory(t.simbolo)}>
-          <span className="trade-symbol">{t.simbolo}</span>
-          <span className={`badge ${t.pl_eur > 0 ? "win" : "loss"}`}>{t.pl_eur > 0 ? "Win" : "Loss"}</span>
-          <span style={{ color: MUTE, fontSize: 12 }}>{t.tipo_ordem}</span>
-          <span style={{ color: MUTE, fontSize: 12 }}>{fmtPais(t.pais)}</span>
-          <span className={`trade-pl ${t.pl_eur > 0 ? "win" : "loss"}`}>{fmt(t.pl_eur)}</span>
-          <span className="trade-date">{t.data_fecho?.slice(0, 10)}</span>
+      {holdings.length === 0 ? (
+        <div style={{ color: MUTE, fontSize: "0.85rem", padding: "16px 0", lineHeight: 1.6 }}>
+          Sem posições abertas. Importa um <strong>Activity Statement do IBKR</strong> que inclua a secção <em>“Open Positions”</em> — as ações em carteira são atualizadas automaticamente a cada importação.
         </div>
-      ))}
+      ) : (() => {
+        const COLS = "minmax(150px,1.6fr) 1fr 1.4fr 1.1fr 1.2fr 1fr 1fr";
+        const HEADERS = ["Símbolo", "Último Preço", "Valor Justo", "Retorno Total", "Valor/Custo", "Peso/Ações", "Preço Médio"];
+        return (
+          <div style={{ overflowX: "auto" }}>
+            <div style={{ minWidth: 860 }}>
+              {/* Títulos (como cabeçalho de tabela) */}
+              <div style={{ display: "grid", gridTemplateColumns: COLS, gap: 12, padding: "0 16px 8px", borderBottom: "1px solid var(--border)" }}>
+                {HEADERS.map(h => (
+                  <div key={h} style={{ fontSize: "0.7rem", color: MUTE, fontWeight: 600, whiteSpace: "nowrap" }}>{h}</div>
+                ))}
+              </div>
+
+              {/* Cada ativo = um card */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+                {holdings.map(h => {
+                  const retPct  = h.custo_eur ? (h.pl_eur || 0) / h.custo_eur * 100 : 0;
+                  const peso    = holdingsTotalValue ? (h.valor_eur || 0) / holdingsTotalValue * 100 : 0;
+                  const pos     = (h.pl_eur || 0) >= 0;
+                  const fvMoeda = h.valor_justo_moeda || h.moeda;
+                  // Desconto vs último preço: positivo = subvalorizada.
+                  const disc = (h.valor_justo != null && h.preco_atual)
+                    ? (h.valor_justo - h.preco_atual) / h.valor_justo * 100 : null;
+                  const editing = fvEdit?.simbolo === h.simbolo;
+                  const stop = e => e.stopPropagation();
+                  return (
+                    <div key={h.simbolo} className="card" onClick={() => openSymbolHistory(h.simbolo)}
+                      style={{ display: "grid", gridTemplateColumns: COLS, gap: 12, alignItems: "center",
+                        padding: "14px 16px", cursor: "pointer", transition: "border-color .15s" }}
+                      onMouseEnter={e => e.currentTarget.style.borderColor = "var(--accent)"}
+                      onMouseLeave={e => e.currentTarget.style.borderColor = "var(--border)"}>
+
+                      {/* Nome do ativo */}
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 800, color: "#fbbf24" }}>{h.simbolo}</div>
+                        <div style={{ fontSize: "0.7rem", color: MUTE, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {h.nome || CAT_META[h.categoria]?.label || h.categoria || "—"}
+                        </div>
+                      </div>
+
+                      {/* Último preço */}
+                      <div style={{ fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap" }}>
+                        {fmtCur(h.preco_atual, h.moeda)}
+                      </div>
+
+                      {/* Valor Justo (manual, com lápis) */}
+                      <div onClick={stop} style={{ minWidth: 0 }}>
+                        {editing ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <input type="number" autoFocus value={fvEdit.valor}
+                              onChange={e => setFvEdit({ ...fvEdit, valor: e.target.value })}
+                              onKeyDown={e => { if (e.key === "Enter") saveFairValue(h.simbolo, fvEdit.valor, fvMoeda); if (e.key === "Escape") setFvEdit(null); }}
+                              style={{ width: 90, padding: "4px 6px", fontSize: "0.78rem" }} />
+                            <button onClick={() => saveFairValue(h.simbolo, fvEdit.valor, fvMoeda)} title="Guardar"
+                              style={{ background: "none", border: "none", cursor: "pointer", color: GREEN, padding: 2 }}>
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            </button>
+                            <button onClick={() => setFvEdit(null)} title="Cancelar"
+                              style={{ background: "none", border: "none", cursor: "pointer", color: MUTE, padding: 2 }}>
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <div style={{ minWidth: 0 }}>
+                              {h.valor_justo != null ? (
+                                <>
+                                  <div style={{ fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap" }}>{fmtCur(h.valor_justo, fvMoeda)}</div>
+                                  {disc != null && (
+                                    <div style={{ fontSize: "0.68rem", color: disc >= 0 ? GREEN : RED, whiteSpace: "nowrap" }}>
+                                      {Math.abs(disc).toFixed(1)}% {disc >= 0 ? "subvalorizada" : "sobrevalorizada"}
+                                    </div>
+                                  )}
+                                </>
+                              ) : (
+                                <span style={{ color: MUTE, fontStyle: "italic" }}>definir</span>
+                              )}
+                            </div>
+                            <button onClick={() => setFvEdit({ simbolo: h.simbolo, valor: h.valor_justo ?? "" })} title="Editar valor justo"
+                              style={{ background: "none", border: "none", cursor: "pointer", color: MUTE, padding: 2, flexShrink: 0 }}
+                              onMouseEnter={e => e.currentTarget.style.color = "var(--accent)"}
+                              onMouseLeave={e => e.currentTarget.style.color = MUTE}>
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Retorno Total (não realizado) */}
+                      <div style={{ whiteSpace: "nowrap" }}>
+                        <div style={{ color: pos ? GREEN : RED, fontWeight: 700 }}>{pctTxt(retPct)}</div>
+                        <div style={{ fontSize: "0.7rem", color: pos ? GREEN : RED }}>{fmt(h.pl_eur || 0)}</div>
+                      </div>
+
+                      {/* Valor / Custo (EUR) */}
+                      <div style={{ whiteSpace: "nowrap" }}>
+                        <div style={{ color: "var(--text)", fontWeight: 700 }}>{fmtAbs(h.valor_eur || 0)}</div>
+                        <div style={{ fontSize: "0.7rem", color: MUTE }}>{fmtAbs(h.custo_eur || 0)}</div>
+                      </div>
+
+                      {/* Peso / Ações */}
+                      <div style={{ whiteSpace: "nowrap" }}>
+                        <div style={{ color: "var(--text)", fontWeight: 700 }}>{peso.toFixed(1)}%</div>
+                        <div style={{ fontSize: "0.7rem", color: MUTE }}>{(h.quantidade ?? 0).toLocaleString("de-DE")}</div>
+                      </div>
+
+                      {/* Preço Médio (moeda nativa) */}
+                      <div style={{ color: "var(--text)", whiteSpace: "nowrap" }}>{fmtCur(h.preco_medio, h.moeda)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+      <div style={{ fontSize: "0.66rem", color: MUTE, marginTop: 12, lineHeight: 1.5 }}>
+        Posições abertas atualizadas a cada importação (secção <em>“Open Positions”</em> do relatório). <strong>Valor/Custo</strong> e <strong>Retorno Total</strong> em EUR; <strong>Último Preço</strong> e <strong>Preço Médio</strong> na moeda do ativo. <strong>Valor Justo</strong> é manual (ícone do lápis). A XTB normalmente não exporta posições abertas — usa o IBKR.
+      </div>
       </div>{/* ── fim do conteúdo com scroll ── */}
 
       {/* ── Modal ── */}

@@ -566,6 +566,7 @@ async function parseIBKR(buffer) {
   // alpha-2) — fonte mais fiável de país.
   const ISIN_RE = /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/;
   const isinBySymbol = new Map(); // symbol → prefixo ISO 2 letras (ex: "DE")
+  const nameBySymbol = new Map(); // symbol → nome do instrumento (Description)
   let fiiHeaders = null;
   // Número e nome de conta — secção "Account Information" (Field Name "Account"/"Name")
   let accountNumber = null;
@@ -588,6 +589,8 @@ async function parseIBKR(buffer) {
       const sym  = (g("Symbol") || "").replace(/\s/g, "").toUpperCase();
       const isin = (g("Security ID") || g("ISIN") || "").trim().toUpperCase();
       if (sym && ISIN_RE.test(isin)) isinBySymbol.set(sym, isin.slice(0, 2));
+      const desc = (g("Description") || "").trim();
+      if (sym && desc) nameBySymbol.set(sym, desc);
     }
   }
 
@@ -595,14 +598,56 @@ async function parseIBKR(buffer) {
   const trades      = [];
   const dividends   = [];
   const deposits    = [];
+  const holdings    = [];   // posições abertas (secção "Open Positions")
   const needsConv   = [];
 
   let tradeHeaders    = null;
   let divHeaders      = null;
   let depHeaders      = null;
   let interestHeaders = null;
+  let posHeaders      = null;
 
   for (const cols of parsed) {
+
+    // ── Open Positions (Ações em Carteira) ──
+    if (cols[0] === "Open Positions" && cols[1] === "Header") { posHeaders = cols; continue; }
+    if (cols[0] === "Open Positions" && cols[1] === "Data" && posHeaders) {
+      const g = key => { const i = posHeaders.indexOf(key); return i >= 0 ? cols[i] : null; };
+      // Só as linhas-resumo por símbolo (DataDiscriminator = "Summary") — evita somar
+      // os lotes individuais ("Lot") em duplicado. Se a coluna não existir, aceita a linha.
+      const disc = (g("DataDiscriminator") || "").toLowerCase();
+      if (disc && disc !== "summary") continue;
+      const sym = (g("Symbol") || "").replace(/\s/g, "").toUpperCase();
+      const qty = toFloat(g("Quantity"));
+      if (!sym || !qty) continue;                       // ignora linhas vazias / quantidade 0
+      const currency   = g("Currency") || "USD";
+      const costPrice  = toFloat(g("Cost Price"));
+      const costBasis  = toFloat(g("Cost Basis"));
+      const closePrice = toFloat(g("Close Price"));
+      const value      = toFloat(g("Value"));
+      const unreal     = toFloat(g("Unrealized P/L"));
+      const cat = (g("Asset Category") || "").toLowerCase();
+      let categoria = "STOCK";
+      if (cat.includes("option"))                            categoria = "OPTION";
+      else if (cat.includes("future"))                       categoria = "FUTURE";
+      else if (cat.includes("forex") || cat.includes("cfd")) categoria = "CFD";
+      holdings.push({
+        simbolo:      sym,
+        nome:         nameBySymbol.get(sym) || null,
+        categoria,
+        moeda:        currency,
+        quantidade:   qty,
+        preco_medio:  costPrice || (qty ? costBasis / qty : null),  // por ação (moeda nativa)
+        preco_atual:  closePrice,                                    // por ação (moeda nativa)
+        corretora:    "IBKR",
+        conta:        accountNumber,
+        conta_nome:   accountName,
+        _custo_native:  costBasis,
+        _valor_native:  value,
+        _unreal_native: unreal,
+      });
+      continue;
+    }
 
     // ── Trades ──
     if (cols[0] === "Trades" && cols[1] === "Header") { tradeHeaders = cols; continue; }
@@ -610,7 +655,8 @@ async function parseIBKR(buffer) {
       const g   = key => { const i = tradeHeaders.indexOf(key); return i >= 0 ? cols[i] : null; };
       const cat = (g("Asset Category") || "").toLowerCase();
       let categoria = "STOCK";
-      if (cat.includes("option"))              categoria = "OPTION";
+      if (cat.includes("option"))                            categoria = "OPTION";  // inclui "Futures Options"
+      else if (cat.includes("future"))                       categoria = "FUTURE";
       else if (cat.includes("forex") || cat.includes("cfd")) categoria = "CFD";
 
       const currency  = g("Currency") || "USD";
@@ -759,7 +805,7 @@ async function parseIBKR(buffer) {
     }
   }
 
-  if (!trades.length && !dividends.length && !deposits.length)
+  if (!trades.length && !dividends.length && !deposits.length && !holdings.length)
     throw new Error("Nenhuma operação encontrada no ficheiro IBKR. Certifica-te que é um Activity Statement completo.");
 
   // ── Conversão cambial para EUR ──
@@ -793,7 +839,23 @@ async function parseIBKR(buffer) {
     delete d._currency;
   }
 
-  return { trades, dividends, deposits, convFailed };
+  // Converte as posições abertas para EUR — valor "à data de hoje" (a taxa recua para
+  // o último dia útil disponível). Mantém preço/preço médio na moeda nativa.
+  const hoje = new Date().toISOString().slice(0, 10);
+  for (const h of holdings) {
+    const rate = eurRate(h.moeda, hoje) || (h.moeda === "EUR" ? 1 : null);
+    if (rate) {
+      h.custo_eur = h._custo_native  != null ? +(h._custo_native  * rate).toFixed(2) : null;
+      h.valor_eur = h._valor_native  != null ? +(h._valor_native  * rate).toFixed(2) : null;
+      h.pl_eur    = h._unreal_native != null ? +(h._unreal_native * rate).toFixed(2)
+                  : (h.valor_eur != null && h.custo_eur != null ? +(h.valor_eur - h.custo_eur).toFixed(2) : null);
+    } else {
+      convFailed.push(h.simbolo);
+    }
+    delete h._custo_native; delete h._valor_native; delete h._unreal_native;
+  }
+
+  return { trades, dividends, deposits, convFailed, holdings };
 }
 
 // ── Contar duplicados sem gravar (para a pré-visualização) ────
@@ -810,25 +872,48 @@ function countExisting(username, trades, dividends, deposits = []) {
     SELECT 1 FROM depositos WHERE data = ? AND valor = ? AND corretora = ? AND tipo = ?
       AND (conta = ? OR (conta IS NULL AND ? IS NULL)) LIMIT 1`);
 
-  const dupTrades = trades.filter(t =>
-    t.ref_externa && existsTrade.get(t.corretora, t.ref_externa)
-  ).length;
+  const dupItems = [];   // detalhe de cada item ignorado (para o utilizador analisar)
 
-  const dupDividends = dividends.filter(d =>
+  const dupTradeRows = trades.filter(t =>
+    t.ref_externa && existsTrade.get(t.corretora, t.ref_externa)
+  );
+  for (const t of dupTradeRows) dupItems.push({
+    tipo: "Operação", simbolo: t.simbolo, data: (t.data_fecho || "").slice(0, 10) || null,
+    valor: t.pl_eur ?? null, corretora: t.corretora, conta: t.conta ?? null,
+    motivo: "Já importada anteriormente (mesma referência da corretora)",
+  });
+
+  const dupDivRows = dividends.filter(d =>
     (d.ref_externa && existsDivRef.get(d.corretora, d.ref_externa)) ||
     (!d.ref_externa && existsDivKey.get(d.simbolo, d.data_pagamento, d.corretora, d.conta ?? null, d.conta ?? null))
-  ).length;
+  );
+  for (const d of dupDivRows) dupItems.push({
+    tipo: d.tipo === "INTEREST" ? "Juros" : "Dividendo", simbolo: d.simbolo,
+    data: (d.data_pagamento || "").slice(0, 10) || null, valor: d.valor_liq_eur ?? null,
+    corretora: d.corretora, conta: d.conta ?? null,
+    motivo: d.ref_externa ? "Já importado (mesma referência)" : "Já importado (mesmo símbolo/data/conta)",
+  });
 
-  const dupDeposits = deposits.filter(d =>
+  const dupDepRows = deposits.filter(d =>
     (d.ref_externa && existsDepRef.get(d.corretora, d.ref_externa)) ||
     (!d.ref_externa && existsDepKey.get(d.data, d.valor, d.corretora, d.tipo, d.conta ?? null, d.conta ?? null))
-  ).length;
+  );
+  for (const d of dupDepRows) dupItems.push({
+    tipo: d.tipo === "levantamento" ? "Levantamento" : "Depósito", simbolo: "—",
+    data: (d.data || "").slice(0, 10) || null,
+    valor: d.tipo === "levantamento" ? -(d.valor ?? 0) : (d.valor ?? 0),
+    corretora: d.corretora, conta: d.conta ?? null,
+    motivo: d.ref_externa ? "Já importado (mesma referência)" : "Já importado (mesma data/valor/conta)",
+  });
 
-  return { dupTrades, dupDividends, dupDeposits };
+  return {
+    dupTrades: dupTradeRows.length, dupDividends: dupDivRows.length, dupDeposits: dupDepRows.length,
+    dupItems,
+  };
 }
 
 // ── Gravar no SQLite ──────────────────────────────────────
-function saveData(username, trades, dividends, deposits = []) {
+function saveData(username, trades, dividends, deposits = [], holdings = []) {
   const db = getDb(username);
 
   const insTrade = db.prepare(`
@@ -896,6 +981,30 @@ function saveData(username, trades, dividends, deposits = []) {
       );
       insertedDeps += r.changes;
     }
+
+    // Posições abertas: snapshot do relatório. Substitui as posições por (corretora,
+    // conta) presentes neste relatório — assim ficam sempre atualizadas a cada importação
+    // sem afetar contas que não vêm neste ficheiro. O valor justo (manual) fica intacto.
+    if (holdings.length) {
+      const delPos = db.prepare(
+        `DELETE FROM posicoes WHERE corretora = ? AND (conta = ? OR (conta IS NULL AND ? IS NULL))`);
+      const insPos = db.prepare(`INSERT INTO posicoes
+        (simbolo, nome, categoria, moeda, quantidade, preco_medio, custo_eur,
+         preco_atual, valor_eur, pl_eur, corretora, conta, conta_nome, atualizado_em)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+      const now = new Date().toISOString();
+      const cleared = new Set();
+      for (const h of holdings) {
+        const key = `${h.corretora}|${h.conta ?? ""}`;
+        if (!cleared.has(key)) { delPos.run(h.corretora, h.conta ?? null, h.conta ?? null); cleared.add(key); }
+        insPos.run(
+          h.simbolo, h.nome ?? null, h.categoria ?? null, h.moeda ?? null,
+          h.quantidade ?? null, h.preco_medio ?? null, h.custo_eur ?? null,
+          h.preco_atual ?? null, h.valor_eur ?? null, h.pl_eur ?? null,
+          h.corretora, h.conta ?? null, h.conta_nome ?? null, now
+        );
+      }
+    }
     db.exec("COMMIT");
   } catch (e) {
     db.exec("ROLLBACK");
@@ -903,7 +1012,7 @@ function saveData(username, trades, dividends, deposits = []) {
   }
 
   return {
-    insertedTrades, insertedDivs, insertedDeps,
+    insertedTrades, insertedDivs, insertedDeps, holdings: holdings.length,
     skipped: (trades.length - insertedTrades) + (dividends.length - insertedDivs) + (deposits.length - insertedDeps),
   };
 }
@@ -919,22 +1028,22 @@ router.post("/preview", upload.single("file"), async (req, res) => {
   const tipo = req.body.tipo;
   try {
     await fx.ensureFresh();   // garante câmbios frescos antes de converter (no-op se já atualizados)
-    let trades = [], dividends = [], deposits = [], convFailed = [];
+    let trades = [], dividends = [], deposits = [], convFailed = [], holdings = [];
     if (tipo === "xtb") {
-      ({ trades, dividends, deposits, convFailed = [] } = await parseXTB(req.file.buffer));
+      ({ trades, dividends, deposits, convFailed = [], holdings = [] } = await parseXTB(req.file.buffer));
     } else if (tipo === "ibkr") {
-      ({ trades, dividends, deposits, convFailed = [] } = await parseIBKR(req.file.buffer));
+      ({ trades, dividends, deposits, convFailed = [], holdings = [] } = await parseIBKR(req.file.buffer));
     } else {
       return res.status(400).json({ error: "Tipo inválido." });
     }
     const allRows = [...trades, ...dividends, ...deposits];
     const contas     = [...new Set(allRows.map(x => x.conta).filter(Boolean))];
     const contaNomes = [...new Set(allRows.map(x => x.conta_nome).filter(Boolean))];
-    const { dupTrades, dupDividends, dupDeposits } = countExisting(req.session.user.username, trades, dividends, deposits);
+    const { dupTrades, dupDividends, dupDeposits, dupItems } = countExisting(req.session.user.username, trades, dividends, deposits);
     res.json({
-      nTrades: trades.length, nDividends: dividends.length, nDeposits: deposits.length,
+      nTrades: trades.length, nDividends: dividends.length, nDeposits: deposits.length, nHoldings: holdings.length,
       nTradesNovas: trades.length - dupTrades, nDividendsNovas: dividends.length - dupDividends, nDepositsNovas: deposits.length - dupDeposits,
-      convFailed, preview: trades.slice(0, 5), contas, contaNomes,
+      dupItems, convFailed, preview: trades.slice(0, 5), contas, contaNomes,
     });
   } catch (e) {
     res.status(422).json({ error: e.message });
@@ -950,15 +1059,15 @@ router.post("/confirm", upload.single("file"), async (req, res) => {
   const tipo = req.body.tipo;
   try {
     await fx.ensureFresh();   // garante câmbios frescos antes de converter (no-op se já atualizados)
-    let trades = [], dividends = [], deposits = [], convFailed = [];
+    let trades = [], dividends = [], deposits = [], convFailed = [], holdings = [];
     if (tipo === "xtb") {
-      ({ trades, dividends, deposits, convFailed = [] } = await parseXTB(req.file.buffer));
+      ({ trades, dividends, deposits, convFailed = [], holdings = [] } = await parseXTB(req.file.buffer));
     } else if (tipo === "ibkr") {
-      ({ trades, dividends, deposits, convFailed = [] } = await parseIBKR(req.file.buffer));
+      ({ trades, dividends, deposits, convFailed = [], holdings = [] } = await parseIBKR(req.file.buffer));
     } else {
       return res.status(400).json({ error: "Tipo inválido." });
     }
-    const stats = saveData(req.session.user.username, trades, dividends, deposits);
+    const stats = saveData(req.session.user.username, trades, dividends, deposits, holdings);
     const allRows  = [...trades, ...dividends, ...deposits];
     const contas     = [...new Set(allRows.map(x => x.conta).filter(Boolean))].join(", ") || null;
     const contaNomes = [...new Set(allRows.map(x => x.conta_nome).filter(Boolean))].join(", ") || null;
@@ -968,7 +1077,8 @@ router.post("/confirm", upload.single("file"), async (req, res) => {
       .run(req.file.originalname, tipo.toUpperCase(), stats.insertedTrades, stats.insertedDivs, stats.skipped, contas, contaNomes);
     res.json({
       ok: true, nTrades: stats.insertedTrades, nDividends: stats.insertedDivs,
-      nDeposits: stats.insertedDeps, nSkipped: stats.skipped, convFailed, conta: contas, contaNome: contaNomes,
+      nDeposits: stats.insertedDeps, nHoldings: stats.holdings, nSkipped: stats.skipped,
+      convFailed, conta: contas, contaNome: contaNomes,
     });
   } catch (e) {
     res.status(422).json({ error: e.message });
@@ -989,14 +1099,6 @@ router.get("/history", (req, res) => {
     const rows = getDb(req.session.user.username).prepare("SELECT * FROM import_history ORDER BY imported_at DESC LIMIT 50").all();
     res.json(rows);
   } catch { res.json([]); }
-});
-
-// ── DELETE /api/import/history/:id ───────────────────────
-router.delete("/history/:id", (req, res) => {
-  try {
-    getDb(req.session.user.username).prepare("DELETE FROM import_history WHERE id = ?").run(Number(req.params.id));
-    res.json({ ok: true });
-  } catch { res.status(500).json({ error: "Erro ao apagar entrada." }); }
 });
 
 // ── POST /api/import/database — substitui .db ────────────

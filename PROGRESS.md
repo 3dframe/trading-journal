@@ -6,13 +6,66 @@
 - (nada a meio)
 
 ## Por validar (no browser, próxima sessão)
-- **Modais com linha selecionada**: ao clicar numa linha da tabela de um modal e abrir o
-  detalhe, ao voltar atrás a linha fica destacada (contorno `--accent`) e faz-se scroll
-  até ela (antes voltava ao topo). Confirmar UX em http://localhost:5173.
+- **Ações em Carteira (Holdings)**: importar o CSV IBKR `U6673215_202605_202605.csv` em
+  Importar Dados → deve mostrar "📊 16 posições abertas detetadas" na pré-visualização e,
+  após confirmar, "16 posições em carteira atualizadas". No Dashboard, secção "Ações em
+  Carteira" com 16 cards. Testar o lápis do Valor Justo (grava e mostra % sub/sobrevalorizada).
+  Dry-run já validado contra os CSV reais 2025 (12 pos.) e 2026 (16 pos.).
+- **Menu de utilizador global**: confirmar que aparece no canto sup. direito em TODAS as
+  páginas (Tema/Administração/Definições/Sair) e que não há sobreposição com cabeçalhos.
+- **Card Total Acumulado (Simply Wall St)**: testar tabs, intervalos, e o toggle
+  Empilhado/Combinado.
+- **Modais com linha selecionada**: (pendente da sessão anterior) confirmar destaque +
+  scroll ao voltar atrás.
 
 ## Pendente (decisão do utilizador)
 - Redundância: o card "Categorias" (mini-donuts) duplica o novo donut "Repartição por
   Categoria" — decidir se se remove.
+- **Seletor de ano removido** do cabeçalho do Dashboard (a pedido) — Dashboard fica no ano
+  mais recente. Se quiser trocar de ano, é preciso realocar o seletor.
+- **Feed de cotações / valor justo automático**: "Último Preço" das Holdings é o preço de
+  fecho à data do relatório (atualiza a cada importação), não em tempo real. Valor Justo é
+  manual. Integrar API externa fica para decisão futura.
+
+## Feito na sessão de 2026-06-27
+- **Sessão/login**: cookie passou a ser de sessão (sem maxAge → expira ao fechar o browser,
+  obriga sempre a login); ttl do FileStore reduzido p/ 1 dia; sessões antigas limpas. Em
+  `server/index.js`.
+- **Repartição por Categoria dinâmica**: categorias detetadas automaticamente dos dados
+  (deixou de ser lista fixa STOCK/OPTION/CFD). Mapa `CAT_META` + fallback de cor/rótulo;
+  parser IBKR passou a reconhecer `Futures`→FUTURE (`import.js`). Em `Dashboard.jsx`.
+- **Card "Total Acumulado" estilo Simply Wall St**: tabs (Valor ao Longo do Tempo / vs
+  Mercado [inativo, "brevemente"]), 4 painéis (Valor Total, Retornos 1D, Retornos Totais,
+  TIR anualizada), Valor da Carteira/Base de Custo, intervalos, e toggle Empilhado/Combinado.
+  Novo endpoint `GET /api/trades/equity-detailed` (equity acumulada por categoria).
+- **Menu de utilizador**: removido da sidebar; novo componente `components/UserMenu.jsx`
+  global (fixo, canto sup. direito, em todas as páginas), suave (sem card). "Administração"
+  movida da sidebar para dentro deste menu.
+- **Ações em Carteira (posições abertas)** — funcionalidade nova:
+  - BD: tabelas `posicoes` (snapshot) e `fair_value` (valor justo manual, persiste) em `db.js`.
+  - Import: parser lê a secção **"Open Positions"** do CSV IBKR (Summary rows), converte
+    p/ EUR, e em `saveData` substitui as posições por (corretora, conta) a cada importação.
+    Pré-passagem capta também o nome do instrumento (Description).
+  - Rotas: `GET /api/trades/holdings` (posições + valor justo) e `POST /api/trades/fair-value`.
+  - Frontend: substituiu "Últimas Trades" por cards "Ações em Carteira" (Nome, Último Preço,
+    Valor Justo c/ lápis + % sub/sobrevalorizada, Retorno Total, Valor/Custo, Peso/Ações,
+    Preço Médio). Contagem na pré-visualização e na msg de sucesso da importação.
+  - **XTB não exporta posições abertas** (só Cash Operations + Closed Positions) → Holdings
+    só do IBKR. Importar o **CSV** do IBKR (não o PDF).
+- **Barra de topo (fix do overlap)**: o menu de utilizador estava `position:fixed` e tapava
+  o conteúdo ao fazer scroll. Passou para uma `.topbar` dentro de `.layout-right`, fora da
+  área de scroll (var `--topbar-h` no `theme.css`; Dashboard/TradeLog descontam-na na altura).
+- **Histórico de importações**: removido o botão "Remover" (e rota `DELETE /history/:id`) —
+  só apagava o registo do log, não os dados, pelo que confundia. Histórico fica só de leitura.
+- **Menu de utilizador**: iniciais do 1.º+último nome ("Paulo Carmo"→"PC"); dropdown deixou
+  de repetir nome/função (já estão no botão).
+- **Reset à BD (Administração)**: "Zona de Perigo" com "Apagar tudo" → `POST /api/admin/reset-data`
+  limpa trades/dividendos/depósitos/posições/fair_value/import_history (conta e câmbios
+  intactos). Confirmação dupla: escrever o username no modal + validação no servidor
+  (`confirm===username`). Lógica validada com BD de teste descartável.
+- **Transparência dos "Ignorados"**: `countExisting` devolve `dupItems` (tipo/símbolo/data/
+  valor/motivo); pré-visualização tem link "Ver o que vai ser ignorado" com tabela detalhada;
+  mensagem de sucesso e cabeçalho do histórico ("Ignorados ⓘ") explicam que = já existia na BD.
 
 ## Feito na sessão de 2026-06-22
 - **start.bat / stop.bat** na raiz: arranque (server+client+browser) e paragem (taskkill
@@ -61,4 +114,4 @@
 - **País COR**: Corticeira Amorim → `COR:"PT"` no mapa + dados IBKR migrados.
 
 ## Última atualização
-2026-06-22
+2026-06-27

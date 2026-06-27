@@ -83,7 +83,7 @@ function SectionTitle({ children }) {
   );
 }
 
-function HistoryTable({ history, onDelete }) {
+function HistoryTable({ history }) {
   if (!history.length) return (
     <div style={{ textAlign: "center", padding: "28px 16px", color: "var(--muted)", fontSize: "0.8rem" }}>
       Ainda não foram importados relatórios.
@@ -95,13 +95,16 @@ function HistoryTable({ history, onDelete }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
         <thead>
           <tr>
-            {["Corretora", "Conta", "Ficheiro", "Operações", "Dividendos", "Ignorados", "Data Importação", ""].map(h => (
-              <th key={h} style={{
-                padding: "8px 12px", textAlign: h === "Operações" || h === "Dividendos" || h === "Ignorados" ? "center" : "left",
-                background: "var(--hover)", color: "var(--muted)", fontWeight: 700,
-                fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: ".05em",
-                whiteSpace: "nowrap", borderBottom: "1px solid var(--border)",
-              }}>{h}</th>
+            {["Corretora", "Conta", "Ficheiro", "Operações", "Dividendos", "Ignorados", "Data Importação"].map(h => (
+              <th key={h}
+                title={h === "Ignorados" ? "Registos que já existiam na base de dados — ignorados nessa importação para evitar duplicados." : undefined}
+                style={{
+                  padding: "8px 12px", textAlign: h === "Operações" || h === "Dividendos" || h === "Ignorados" ? "center" : "left",
+                  background: "var(--hover)", color: "var(--muted)", fontWeight: 700,
+                  fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: ".05em",
+                  whiteSpace: "nowrap", borderBottom: "1px solid var(--border)",
+                  cursor: h === "Ignorados" ? "help" : "default",
+                }}>{h === "Ignorados" ? "Ignorados ⓘ" : h}</th>
             ))}
           </tr>
         </thead>
@@ -134,14 +137,6 @@ function HistoryTable({ history, onDelete }) {
               <td style={{ padding: "9px 12px", color: "var(--muted)", whiteSpace: "nowrap" }}>
                 {h.imported_at?.replace("T", " ").slice(0, 16)}
               </td>
-              <td style={{ padding: "9px 12px", textAlign: "center" }}>
-                <button onClick={() => onDelete(h.id)} title="Remover importação"
-                  style={{
-                    background: "none", border: "1px solid var(--border)", borderRadius: 6,
-                    color: "var(--muted)", cursor: "pointer", fontSize: "0.72rem",
-                    padding: "3px 8px", lineHeight: 1,
-                  }}>✕ Remover</button>
-              </td>
             </tr>
           ))}
         </tbody>
@@ -169,7 +164,8 @@ export default function Import() {
     fetchHistory();
   }, [fetchHistory]);
 
-  const reset = () => { setFile(null); setPreview(null); setStatus(null); };
+  const [showDups, setShowDups] = useState(false);
+  const reset = () => { setFile(null); setPreview(null); setStatus(null); setShowDups(false); };
 
   const handleFile = (f, tipo) => {
     setPreview(null);
@@ -203,7 +199,7 @@ export default function Import() {
       form.append("file", file.f);
       form.append("tipo", file.tipo);
       const { data } = await axios.post("/api/import/confirm", form);
-      setStatus({ ok: true, nTrades: data.nTrades, nDividends: data.nDividends, nDeposits: data.nDeposits, nSkipped: data.nSkipped });
+      setStatus({ ok: true, nTrades: data.nTrades, nDividends: data.nDividends, nDeposits: data.nDeposits, nHoldings: data.nHoldings, nSkipped: data.nSkipped });
       setPreview(null);
       setFile(null);
       fetchHistory();
@@ -214,10 +210,6 @@ export default function Import() {
     }
   };
 
-  const deleteHistory = async (id) => {
-    await axios.delete(`/api/import/history/${id}`).catch(() => {});
-    fetchHistory();
-  };
 
   if (mode === null) return <div className="spinner" />;
 
@@ -315,16 +307,62 @@ export default function Import() {
                 <span>💰 <strong style={{ color: "var(--text)" }}>{preview.nDividends}</strong> dividendos</span>}
               {preview.nDeposits > 0 &&
                 <span>🏦 <strong style={{ color: "var(--text)" }}>{preview.nDeposits}</strong> depósitos/levantamentos</span>}
+              {preview.nHoldings > 0 &&
+                <span>📊 <strong style={{ color: "var(--text)" }}>{preview.nHoldings}</strong> posições abertas detetadas</span>}
             </div>
             {(() => {
               const totalNovas = (preview.nTradesNovas ?? preview.nTrades) + (preview.nDividendsNovas ?? preview.nDividends) + (preview.nDepositsNovas ?? preview.nDeposits);
               const totalFicheiro = preview.nTrades + preview.nDividends + preview.nDeposits;
               const totalDuplicadas = totalFicheiro - totalNovas;
               if (totalDuplicadas <= 0) return null;
+              const dups = preview.dupItems || [];
               return (
-                <div style={{ marginTop: 10, fontSize: "0.78rem", color: totalNovas === 0 ? "#f59e0b" : "var(--muted)" }}>
-                  ⚠️ {totalDuplicadas} de {totalFicheiro} já {totalDuplicadas === 1 ? "foi importado" : "foram importados"} anteriormente
-                  {totalNovas > 0 ? ` — apenas ${totalNovas} ${totalNovas === 1 ? "é novo" : "são novos"}.` : " — nada de novo para importar."}
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ fontSize: "0.78rem", color: totalNovas === 0 ? "#f59e0b" : "var(--muted)" }}>
+                    ⚠️ {totalDuplicadas} de {totalFicheiro} já {totalDuplicadas === 1 ? "foi importado" : "foram importados"} anteriormente
+                    {totalNovas > 0 ? ` — apenas ${totalNovas} ${totalNovas === 1 ? "é novo e será importado" : "são novos e serão importados"}.` : " — nada de novo para importar."}
+                    {dups.length > 0 && (
+                      <button onClick={() => setShowDups(s => !s)}
+                        style={{ marginLeft: 8, background: "none", border: "none", padding: 0,
+                          color: "#60a5fa", cursor: "pointer", fontSize: "0.78rem", fontWeight: 700, textDecoration: "underline" }}>
+                        {showDups ? "Ocultar detalhes" : `Ver o que vai ser ignorado (${dups.length})`}
+                      </button>
+                    )}
+                  </div>
+
+                  {showDups && dups.length > 0 && (
+                    <div style={{ marginTop: 8, border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+                      <div style={{ maxHeight: 240, overflowY: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.74rem" }}>
+                          <thead>
+                            <tr>
+                              {["Tipo", "Símbolo", "Data", "Valor €", "Motivo"].map(h => (
+                                <th key={h} style={{ position: "sticky", top: 0, zIndex: 1,
+                                  padding: "7px 10px", textAlign: h === "Valor €" ? "right" : "left",
+                                  background: "var(--hover)", color: "var(--muted)", fontWeight: 700,
+                                  fontSize: "0.66rem", textTransform: "uppercase", letterSpacing: ".05em", whiteSpace: "nowrap" }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dups.map((d, i) => (
+                              <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
+                                <td style={{ padding: "6px 10px", color: "var(--text)", whiteSpace: "nowrap" }}>{d.tipo}</td>
+                                <td style={{ padding: "6px 10px", fontWeight: 700, color: "var(--text)" }}>{d.simbolo}</td>
+                                <td style={{ padding: "6px 10px", color: "var(--muted)", whiteSpace: "nowrap" }}>{d.data || "—"}</td>
+                                <td style={{ padding: "6px 10px", textAlign: "right", whiteSpace: "nowrap",
+                                  color: (d.valor ?? 0) >= 0 ? "#22c55e" : "#f43f5e" }}>{d.valor != null ? fmt(d.valor) : "—"}</td>
+                                <td style={{ padding: "6px 10px", color: "var(--muted)" }}>{d.motivo}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div style={{ padding: "8px 10px", fontSize: "0.7rem", color: "var(--muted)", borderTop: "1px solid var(--border)", background: "var(--card)" }}>
+                        Estes itens <strong>não serão reimportados</strong> porque já existem na base de dados (evita duplicados). Se algum não devia estar repetido, verifica o relatório/conta antes de prosseguir.
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })()}
@@ -428,7 +466,8 @@ export default function Import() {
             <div style={{ fontWeight: 700, color: "#22c55e", fontSize: "0.88rem" }}>Importação concluída!</div>
             <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginTop: 2 }}>
               {status.nTrades} operações{status.nDividends ? `, ${status.nDividends} dividendos` : ""}{status.nDeposits ? `, ${status.nDeposits} depósitos` : ""} importados.
-              {status.nSkipped > 0 && ` ${status.nSkipped} duplicados ignorados.`}
+              {status.nHoldings > 0 && ` ${status.nHoldings} posições em carteira atualizadas.`}
+              {status.nSkipped > 0 && ` ${status.nSkipped} ${status.nSkipped === 1 ? "registo já existia" : "registos já existiam"} na base de dados e ${status.nSkipped === 1 ? "foi ignorado" : "foram ignorados"} (para evitar duplicados).`}
             </div>
           </div>
         </div>
@@ -446,7 +485,7 @@ export default function Import() {
       {/* ── Histórico de Importações ── */}
       <div className="card" style={{ padding: "18px 20px", marginTop: 28 }}>
         <SectionTitle>📋 Histórico de Importações</SectionTitle>
-        <HistoryTable history={history} onDelete={deleteHistory} />
+        <HistoryTable history={history} />
       </div>
 
       {/* ── Depósitos / Levantamentos ── */}
