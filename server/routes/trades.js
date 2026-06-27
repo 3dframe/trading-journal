@@ -18,6 +18,7 @@ function yahooTicker(h) {
   if (h.yahoo_ticker) return h.yahoo_ticker;          // override manual do utilizador
   const sym = (h.simbolo || "").toUpperCase();
   if (!sym) return null;
+  if (h.categoria === "CRYPTO") return `${sym}-EUR`;  // cripto cotada em EUR na Yahoo (BTC-EUR, ETH-EUR…)
   if (h.moeda === "USD") return sym;                  // EUA → ticker directo
   const suf = YAHOO_SUFFIX[h.pais];
   if (suf !== undefined && suf !== "") return sym + suf;
@@ -190,7 +191,8 @@ router.get("/by-symbol", (req, res) => {
     res.json(db.prepare(`SELECT
       simbolo, COUNT(*) as n_trades, SUM(pl_eur) as pl_total,
       SUM(CASE WHEN pl_eur > 0 THEN 1 ELSE 0 END) as n_wins, AVG(pl_eur) as avg_pl,
-      SUM(pl_orig) as pl_total_orig, AVG(pl_orig) as avg_pl_orig, MAX(moeda_original) as moeda
+      SUM(pl_orig) as pl_total_orig, AVG(pl_orig) as avg_pl_orig, MAX(moeda_original) as moeda,
+      MAX(pais) as pais
     FROM trades ${where} GROUP BY simbolo ORDER BY pl_total DESC`).all(...params));
   } catch (e) {
     res.status(500).json({ error: e.message });

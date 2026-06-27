@@ -5,6 +5,7 @@ import {
   XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid,
 } from "recharts";
 import Modal from "../components/Modal.jsx";
+import TradeDetail from "../components/TradeDetail.jsx";
 
 const fmt = v =>
   (v < 0 ? "-" : "") + "€ " +
@@ -24,6 +25,14 @@ const fmtCur = (v, moeda) => {
 const GREEN = "#10b981", RED = "#f43f5e", BLUE = "#60a5fa",
       PINK = "#f472b6", AMBER = "#fbbf24", PURPLE = "#a78bfa", TEAL = "#14b8a6", MUTE = "#6b7280";
 
+// Clareia (p>0) ou escurece (p<0) uma cor hex — usado para gerar o degradê das fatias dos donuts.
+const shade = (hex, p) => {
+  const n = parseInt(hex.slice(1), 16);
+  const adj = c => Math.max(0, Math.min(255, Math.round(c + 255 * p)));
+  const r = adj((n >> 16) & 255), g = adj((n >> 8) & 255), b = adj(n & 255);
+  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+};
+
 // Metadados das categorias de trades conhecidas (rótulo PT, cor e emoji).
 // As categorias são detetadas automaticamente a partir dos dados — se aparecer
 // uma categoria nova no relatório (ex.: FUTURE), o card mostra-a na mesma,
@@ -40,6 +49,8 @@ const CAT_META = {
 };
 // Cores atribuídas por ordem de aparição a categorias sem entrada em CAT_META.
 const CAT_FALLBACK_COLORS = ["#a78bfa", "#22d3ee", "#fb7185", "#34d399", "#facc15", "#c084fc", "#fb923c"];
+// Paleta para as fatias do donut de ativos em carteira (junto ao Win/Loss).
+const ASSET_COLORS = ["#f7931a", "#627eea", "#14f195", "#2a5ada", "#26a17b", "#a78bfa", "#22d3ee", "#fb7185", "#34d399", "#facc15", "#c084fc", "#fb923c"];
 // Rótulo legível para uma categoria não mapeada: "FUTURE" → "Future".
 const prettyCat = cat => !cat ? "Outros" : cat.charAt(0).toUpperCase() + cat.slice(1).toLowerCase();
 
@@ -578,10 +589,18 @@ export default function Dashboard({ user }) {
     { label: "Juros",      color: TEAL,  value: interestLiq,  onClick: openInterest, show: interestLiq !== 0 },
   ].filter(c => c.show);
 
-  // Repartição completa (trades + rendimento) — partilhada pelo donut dedicado
-  // "Repartição por Categoria" e pelo card "Categorias" (mini-donuts).
+  // Criptomoedas em "hold" (posições Bybit) — sem trades fechados, entram na repartição
+  // pelo seu valor de mercado atual (somatório das posições de categoria CRYPTO).
+  const cryptoHoldings = holdings.filter(h => h.categoria === "CRYPTO");
+  const cryptoValue    = cryptoHoldings.reduce((s, h) => s + (h.valor_eur || 0), 0);
+  const cryptoCat      = cryptoValue !== 0
+    ? [{ label: "Criptomoedas", color: CAT_META.CRYPTO.color, value: cryptoValue }]
+    : [];
+
+  // Repartição completa (trades + rendimento + cripto em carteira) — partilhada pelo donut
+  // dedicado "Repartição por Categoria" e pelo card "Categorias" (mini-donuts).
   // Fatias dimensionadas pelo valor absoluto; legenda mostra o valor com sinal e a % do total absoluto.
-  const catBreakdown    = [...tradeCats, ...incomeCats];
+  const catBreakdown    = [...tradeCats, ...incomeCats, ...cryptoCat];
   const catBreakdownAbs = catBreakdown.reduce((s, c) => s + Math.abs(c.value), 0);
   const catBreakdownNet = catBreakdown.reduce((s, c) => s + c.value, 0);
   const catPct          = val => catBreakdownAbs > 0 ? Math.abs(val) / catBreakdownAbs * 100 : 0;
@@ -664,6 +683,14 @@ export default function Dashboard({ user }) {
   // Valor de mercado total da carteira (base para o "Peso" de cada posição).
   const holdingsTotalValue = holdings.reduce((s, h) => s + (h.valor_eur || 0), 0);
 
+  // Donut dos vários ativos em carteira (junto ao Win/Loss): peso de cada ativo pelo
+  // seu valor de mercado. Inclui cripto (Bybit) e quaisquer outras posições abertas.
+  const assetDonut = holdings
+    .filter(h => (h.valor_eur || 0) > 0)
+    .sort((a, b) => (b.valor_eur || 0) - (a.valor_eur || 0))
+    .map((h, i) => ({ name: h.simbolo, v: h.valor_eur, color: ASSET_COLORS[i % ASSET_COLORS.length] }));
+  const assetDonutTotal = assetDonut.reduce((s, a) => s + a.v, 0);
+
   // ── Métricas dos 5 cards de topo ──
   // Unrealized Returns: ganhos/perdas das posições ainda não vendidas (P/L não realizado).
   const unrealTotal = holdings.reduce((s, h) => s + (h.pl_eur || 0), 0);
@@ -691,7 +718,7 @@ export default function Dashboard({ user }) {
       </div>
 
       {/* ── 5 cards de topo (estilo dos cards antigos) ── */}
-      <div style={{ display: "flex", gap: 12, marginBottom: 20, overflowX: "auto", paddingBottom: 4 }}>
+      <div style={{ display: "flex", gap: 12, marginBottom: 20, overflowX: "auto", paddingTop: 4, paddingBottom: 4 }}>
         <MetricCard
           icon={IcoBar(BLUE)} color={BLUE}
           label="Retornos Não Realizados"
@@ -897,6 +924,7 @@ export default function Dashboard({ user }) {
               );
             })}
           </div>
+          <div className="card-footer">Evolução do valor da carteira ao longo do tempo. Alterna entre vista empilhada (por conta) e combinada.</div>
         </div>
 
         {/* ── Repartição por categoria (donut) ── */}
@@ -910,9 +938,17 @@ export default function Dashboard({ user }) {
               <div style={{ position: "relative", height: 188 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
+                    <defs>
+                      {catBreakdown.map((c, i) => (
+                        <linearGradient key={i} id={`catGrad${i}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={shade(c.color, 0.18)} />
+                          <stop offset="100%" stopColor={shade(c.color, -0.12)} />
+                        </linearGradient>
+                      ))}
+                    </defs>
                     <Pie data={catBreakdown.map(c => ({ name: c.label, v: Math.abs(c.value) }))} dataKey="v"
                       innerRadius={54} outerRadius={80} paddingAngle={2} stroke="none">
-                      {catBreakdown.map((c, i) => <Cell key={i} fill={c.color} />)}
+                      {catBreakdown.map((c, i) => <Cell key={i} fill={`url(#catGrad${i})`} />)}
                     </Pie>
                     <Tooltip formatter={(v, n) => [fmtAbs(v), n]}
                       wrapperStyle={{ zIndex: 50 }}
@@ -948,6 +984,7 @@ export default function Dashboard({ user }) {
               </div>
             </>
           )}
+          <div className="card-footer">Peso de cada categoria no P&L do ano (valores absolutos). As criptomoedas em carteira entram pelo seu valor de mercado atual.</div>
         </div>
       </div>
 
@@ -1011,9 +1048,19 @@ export default function Dashboard({ user }) {
               <div style={{ position: "relative", width: 150, height: 150 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
+                    <defs>
+                      <linearGradient id="wlWin" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={shade("#34d399", 0.18)} />
+                        <stop offset="100%" stopColor={shade("#34d399", -0.12)} />
+                      </linearGradient>
+                      <linearGradient id="wlLoss" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={shade("#fb7185", 0.18)} />
+                        <stop offset="100%" stopColor={shade("#fb7185", -0.12)} />
+                      </linearGradient>
+                    </defs>
                     <Pie data={[{ v: stats.n_wins }, { v: stats.n_losses }]} dataKey="v" innerRadius={44} outerRadius={64} paddingAngle={3}
                       onClick={(_, index) => index === 0 ? openWins() : openLosses()} style={{ cursor: "pointer" }}>
-                      <Cell fill="#34d399" /><Cell fill="#fb7185" />
+                      <Cell fill="url(#wlWin)" /><Cell fill="url(#wlLoss)" />
                     </Pie>
                     <Tooltip
                       formatter={(v, n, p) => [v + " trades", p.dataIndex === 0 ? "Wins" : "Losses"]}
@@ -1028,47 +1075,80 @@ export default function Dashboard({ user }) {
                   <div style={{ fontSize: "0.55rem", color: MUTE, marginTop: 2 }}>Win Rate</div>
                 </div>
               </div>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, marginTop: 8, fontSize: "0.7rem" }}>
-                <span style={{ color: GREEN }}>● Wins ({stats.n_wins})</span>
-                <span style={{ color: RED }}>● Losses ({stats.n_losses})</span>
+              {/* Melhor / Pior Dia — por baixo do donut de Win Rate */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%", maxWidth: 180, marginTop: 14 }}>
+                <div onClick={openBestDay} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 10, background: "rgba(16,185,129,0.07)", border: "1px solid rgba(16,185,129,0.18)", cursor: "pointer", transition: "background .2s" }}
+                  onMouseEnter={e => e.currentTarget.style.background = "rgba(16,185,129,0.14)"}
+                  onMouseLeave={e => e.currentTarget.style.background = "rgba(16,185,129,0.07)"}>
+                  <div style={{ width: 30, height: 30, borderRadius: 8, background: GREEN, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "0.58rem", color: GREEN, fontWeight: 700 }}>Melhor Dia</div>
+                    <div style={{ fontSize: "0.8rem", fontWeight: 800, color: "var(--text)" }}>{fmt(stats.best_day ?? 0)}</div>
+                    <div style={{ fontSize: "0.56rem", color: MUTE }}>{stats.best_day_date ?? "—"}</div>
+                  </div>
+                </div>
+                <div onClick={openWorstDay} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 10, background: "rgba(244,63,94,0.07)", border: "1px solid rgba(244,63,94,0.18)", cursor: "pointer", transition: "background .2s" }}
+                  onMouseEnter={e => e.currentTarget.style.background = "rgba(244,63,94,0.14)"}
+                  onMouseLeave={e => e.currentTarget.style.background = "rgba(244,63,94,0.07)"}>
+                  <div style={{ width: 30, height: 30, borderRadius: 8, background: RED, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "0.58rem", color: RED, fontWeight: 700 }}>Pior Dia</div>
+                    <div style={{ fontSize: "0.8rem", fontWeight: 800, color: "var(--text)" }}>{fmt(stats.worst_day ?? 0)}</div>
+                    <div style={{ fontSize: "0.56rem", color: MUTE }}>{stats.worst_day_date ?? "—"}</div>
+                  </div>
+                </div>
               </div>
             </div>
 
-            {/* Melhor / Pior Dia em coluna */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, width: 148, flexShrink: 0 }}>
-              <div onClick={openBestDay} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 10, background: "rgba(16,185,129,0.07)", border: "1px solid rgba(16,185,129,0.18)", cursor: "pointer", transition: "background .2s" }}
-                onMouseEnter={e => e.currentTarget.style.background = "rgba(16,185,129,0.14)"}
-                onMouseLeave={e => e.currentTarget.style.background = "rgba(16,185,129,0.07)"}>
-                <div style={{ width: 30, height: 30, borderRadius: 8, background: GREEN, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>
-                  </svg>
+            {/* Donut dos vários ativos em carteira (cripto em hold + outras posições) */}
+            {assetDonut.length > 0 && (
+              <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "center" }}>
+                <div style={{ position: "relative", width: 150, height: 150 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <defs>
+                        {assetDonut.map((a, i) => (
+                          <linearGradient key={i} id={`assetGrad${i}`} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={shade(a.color, 0.18)} />
+                            <stop offset="100%" stopColor={shade(a.color, -0.12)} />
+                          </linearGradient>
+                        ))}
+                      </defs>
+                      <Pie data={assetDonut} dataKey="v" nameKey="name" innerRadius={44} outerRadius={64} paddingAngle={3} stroke="none">
+                        {assetDonut.map((a, i) => <Cell key={i} fill={`url(#assetGrad${i})`} />)}
+                      </Pie>
+                      <Tooltip formatter={(v, n) => [fmtAbs(v), n]}
+                        contentStyle={{ background: "#1e1e2e", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, fontSize: 12 }}
+                        itemStyle={{ color: "#fff" }} wrapperStyle={{ zIndex: 9999 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", textAlign: "center", pointerEvents: "none" }}>
+                    <div style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--text)", lineHeight: 1 }}>{assetDonut.length}</div>
+                    <div style={{ fontSize: "0.55rem", color: MUTE, marginTop: 2 }}>Ativos</div>
+                  </div>
                 </div>
-                <div>
-                  <div style={{ fontSize: "0.58rem", color: GREEN, fontWeight: 700 }}>Melhor Dia</div>
-                  <div style={{ fontSize: "0.8rem", fontWeight: 800, color: "var(--text)" }}>{fmt(stats.best_day ?? 0)}</div>
-                  <div style={{ fontSize: "0.56rem", color: MUTE }}>{stats.best_day_date ?? "—"}</div>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 3, marginTop: 8, fontSize: "0.68rem" }}>
+                  {assetDonut.slice(0, 6).map(a => (
+                    <span key={a.name} style={{ color: a.color, whiteSpace: "nowrap" }}>
+                      ● <span style={{ color: "var(--text)" }}>{a.name}</span>
+                      <span style={{ color: MUTE }}> {assetDonutTotal ? (a.v / assetDonutTotal * 100).toFixed(0) : 0}%</span>
+                    </span>
+                  ))}
                 </div>
               </div>
-              <div onClick={openWorstDay} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 10, background: "rgba(244,63,94,0.07)", border: "1px solid rgba(244,63,94,0.18)", cursor: "pointer", transition: "background .2s" }}
-                onMouseEnter={e => e.currentTarget.style.background = "rgba(244,63,94,0.14)"}
-                onMouseLeave={e => e.currentTarget.style.background = "rgba(244,63,94,0.07)"}>
-                <div style={{ width: 30, height: 30, borderRadius: 8, background: RED, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/>
-                  </svg>
-                </div>
-                <div>
-                  <div style={{ fontSize: "0.58rem", color: RED, fontWeight: 700 }}>Pior Dia</div>
-                  <div style={{ fontSize: "0.8rem", fontWeight: 800, color: "var(--text)" }}>{fmt(stats.worst_day ?? 0)}</div>
-                  <div style={{ fontSize: "0.56rem", color: MUTE }}>{stats.worst_day_date ?? "—"}</div>
-                </div>
-              </div>
-            </div>
+            )}
 
           </div>
 
-          <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px dashed rgba(255,255,255,0.1)", fontSize: "0.68rem", color: MUTE, lineHeight: 1.6 }}>
+          <div style={{ marginTop: "auto", paddingTop: 12, borderTop: "1px dashed rgba(255,255,255,0.1)", fontSize: "0.68rem", color: MUTE, lineHeight: 1.6 }}>
             <strong style={{ color: "var(--text)" }}>Win Rate</strong> é a percentagem de trades encerradas com lucro. Os valores de ganhos e perdas referem-se exclusivamente a operações de trading — <strong style={{ color: "var(--text)" }}>os dividendos não estão incluídos</strong>. Clica em Melhor/Pior Dia para ver os detalhes das operações desse dia.
           </div>
           </div>
@@ -1083,16 +1163,15 @@ export default function Dashboard({ user }) {
               <div style={{ fontSize: "0.72rem", color: MUTE, marginTop: 2 }}>Ano {ano}</div>
             </div>
             {[
-              { label: "Total de Trades", value: stats.n_trades,            sub: "operações fechadas",         color: "var(--text)", onClick: openAllTrades },
-              { label: "Win Rate",        value: `${wr.toFixed(1)}%`,       sub: "trades com lucro",           color: wr >= 50 ? GREEN : AMBER, onClick: openWins },
-              { label: "Profit Factor",   value: pf.toFixed(2),             sub: "ganhos ÷ perdas",            color: pf >= 1 ? GREEN : RED, onClick: openAllTrades },
-              { label: "Juros",           value: fmt(interestLiq),          sub: "saldos à ordem",             color: interestLiq >= 0 ? GREEN : RED, onClick: openInterest },
-              { label: "Expectancy",      value: fmt(expectancy),           sub: "por trade",                  color: expectancy >= 0 ? GREEN : RED, onClick: openAllTrades },
-              { label: "Max Drawdown",    value: `-${fmtAbs(maxDrawdown)}`, sub: "pico → vale",                color: RED,   onClick: openAllTrades },
-              { label: "Avg Win",         value: fmt(stats.avg_win ?? 0),   sub: "por trade ganho",            color: GREEN, onClick: openWins },
-              { label: "Avg Loss",        value: fmt(stats.avg_loss ?? 0),  sub: "por trade perdido",          color: RED,   onClick: openLosses },
-              { label: "Trades Ganhos",   value: stats.n_wins,              sub: `de ${stats.n_trades} total`, color: GREEN, onClick: openWins },
-              { label: "Trades Perdidos", value: stats.n_losses,            sub: `de ${stats.n_trades} total`, color: RED,   onClick: openLosses },
+              // Win Rate, Trades Ganhos e Trades Perdidos foram removidos por já constarem
+              // no donut Win/Loss ao lado (centro = Win Rate; legenda = nº de Wins/Losses).
+              { label: "Total de Trades", value: stats.n_trades,            sub: "operações fechadas", color: "var(--text)", onClick: openAllTrades },
+              { label: "Profit Factor",   value: pf.toFixed(2),             sub: "ganhos ÷ perdas",    color: pf >= 1 ? GREEN : RED, onClick: openAllTrades },
+              { label: "Juros",           value: fmt(interestLiq),          sub: "saldos à ordem",     color: interestLiq >= 0 ? GREEN : RED, onClick: openInterest },
+              { label: "Expectancy",      value: fmt(expectancy),           sub: "por trade",          color: expectancy >= 0 ? GREEN : RED, onClick: openAllTrades },
+              { label: "Max Drawdown",    value: `-${fmtAbs(maxDrawdown)}`, sub: "pico → vale",        color: RED,   onClick: openAllTrades },
+              { label: "Avg Win",         value: fmt(stats.avg_win ?? 0),   sub: "por trade ganho",    color: GREEN, onClick: openWins },
+              { label: "Avg Loss",        value: fmt(stats.avg_loss ?? 0),  sub: "por trade perdido",  color: RED,   onClick: openLosses },
             ].map((m, i) => (
               <div key={m.label} onClick={m.onClick} style={{
                 display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
@@ -1114,7 +1193,7 @@ export default function Dashboard({ user }) {
 
       {/* ── P&L por Símbolo + Win/Loss donut (kept) ── */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
-        <div className="card" style={{ padding: 20 }}>
+        <div className="card" style={{ padding: 20, display: "flex", flexDirection: "column" }}>
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "var(--text)", marginBottom: 2 }}>P&L por Símbolo (Top 10)</div>
             <div style={{ fontSize: "0.72rem", color: MUTE, marginTop: 2 }}>Ano {ano}</div>
@@ -1140,7 +1219,7 @@ export default function Dashboard({ user }) {
               </Bar>
             </BarChart>
           </ResponsiveContainer>
-          <div style={{ borderTop: "1px dashed rgba(255,255,255,0.1)", marginTop: 12, paddingTop: 10, display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ borderTop: "1px dashed rgba(255,255,255,0.1)", marginTop: "auto", paddingTop: 10, display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ flex: 1, fontSize: "0.67rem", color: MUTE, lineHeight: 1.6 }}>
               Os 10 símbolos com maior impacto no P&L do ano <span style={{ color: "var(--text)", fontWeight: 600 }}>{ano}</span>, ordenados do pior para o melhor resultado. Barras a <span style={{ color: GREEN, fontWeight: 600 }}>verde</span> representam lucro, a <span style={{ color: RED, fontWeight: 600 }}>vermelho</span> prejuízo.
             </div>
@@ -1161,7 +1240,7 @@ export default function Dashboard({ user }) {
           </div>
         </div>
         {/* Categorias */}
-        <div className="card" style={{ padding: 24 }}>
+        <div className="card" style={{ padding: 24, display: "flex", flexDirection: "column" }}>
           <div style={{ fontWeight: 800, fontSize: "1.05rem", color: "var(--text)", marginBottom: 2 }}>Categorias</div>
           <div style={{ fontSize: "0.72rem", color: MUTE, marginBottom: 22 }}>% do P&L total por categoria</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, justifyItems: "center" }}>
@@ -1169,7 +1248,7 @@ export default function Dashboard({ user }) {
               <MiniDonut key={c.label} pct={c.pct} label={c.label} color={c.color} onClick={c.onClick} value={c.value} />
             ))}
           </div>
-          <div style={{ marginTop: 20, paddingTop: 12, borderTop: "1px dashed rgba(255,255,255,0.13)", display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ marginTop: "auto", paddingTop: 12, borderTop: "1px dashed rgba(255,255,255,0.13)", display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: "0.78rem", color: "var(--text)", fontWeight: 700, marginBottom: 4 }}>
                 {stats.n_trades} operações · {nDividendos} dividendos{nJuros > 0 ? ` · ${nJuros} juros` : ""}
@@ -1380,35 +1459,20 @@ export default function Dashboard({ user }) {
           {modal.trades && modal.detailed && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {modal.trades.map(t => (
-                <div key={t.id} style={{ background: "var(--hover)", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+                <div key={t.id}>
+                  {/* Cabeçalho da operação (cantos superiores arredondados; o detalhe encaixa por baixo) */}
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 10, padding: "10px 14px",
+                    background: "var(--hover)", border: "1px solid var(--border)", borderBottom: "none",
+                    borderRadius: "10px 10px 0 0",
+                  }}>
                     <span style={{ fontWeight: 700, color: "var(--text)", minWidth: 70 }}>{t.simbolo}</span>
                     <span className={`badge ${t.pl_eur > 0 ? "win" : "loss"}`}>{t.pl_eur > 0 ? "Win" : "Loss"}</span>
                     <span style={{ fontSize: 11, color: t.categoria === "CFD" ? RED : MUTE, fontWeight: t.categoria === "CFD" ? 700 : 400 }}>{t.categoria}</span>
                     <span style={{ color: MUTE, fontSize: 11 }}>{t.tipo_ordem}</span>
                     <span style={{ marginLeft: "auto", fontWeight: 700, color: t.pl_eur >= 0 ? GREEN : RED }}>{fmt(t.pl_eur)}</span>
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px 16px", padding: "12px 14px", fontSize: 12 }}>
-                    {[
-                      ["Corretora",      t.corretora],
-                      ["Conta",          t.conta],
-                      ["Data Abertura",  t.data_abertura?.slice(0, 19)?.replace("T", " ")],
-                      ["Data Fecho",     t.data_fecho?.slice(0, 19)?.replace("T", " ")],
-                      ["Volume",         t.volume],
-                      ["Preço Abertura", t.preco_abertura != null ? `€ ${Number(t.preco_abertura).toFixed(4)}` : "—"],
-                      ["Preço Fecho",    t.preco_fecho    != null ? `€ ${Number(t.preco_fecho).toFixed(4)}`    : "—"],
-                      ["Moeda",          t.moeda_original],
-                      ["Valor Compra",   t.valor_compra_eur != null ? `€ ${Number(t.valor_compra_eur).toFixed(2)}` : "—"],
-                      ["Valor Venda",    t.valor_venda_eur  != null ? `€ ${Number(t.valor_venda_eur).toFixed(2)}`  : "—"],
-                      ["Comissão",       t.comissao_eur     != null ? `€ ${Number(t.comissao_eur).toFixed(2)}`     : "—"],
-                      ["País",           fmtPais(t.pais)],
-                    ].map(([k, v]) => (
-                      <div key={k}>
-                        <div style={{ color: MUTE, textTransform: "uppercase", fontSize: 10, letterSpacing: ".06em" }}>{k}</div>
-                        <div style={{ color: "var(--text)", marginTop: 2 }}>{v ?? "—"}</div>
-                      </div>
-                    ))}
-                  </div>
+                  <TradeDetail t={t} />
                 </div>
               ))}
             </div>

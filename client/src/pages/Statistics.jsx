@@ -4,6 +4,7 @@ import Modal from "../components/Modal.jsx";
 import {
   BarChart, Bar, Cell, XAxis, YAxis, Tooltip, CartesianGrid,
   ResponsiveContainer, ReferenceLine, ScatterChart, Scatter,
+  PieChart, Pie,
 } from "recharts";
 
 const GREEN="#10b981",RED="#f43f5e",BLUE="#4f6af5",MUTE="#4e6080";
@@ -13,6 +14,23 @@ const fmtPL  = v => (v<0?"-":"")+"€ "+Math.abs(v).toLocaleString("de-DE",{mini
 const fmtSigned = v => (v>=0?"+":"-")+"€ "+Math.abs(v).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2});
 // Valor na moeda original do ativo (ex: US$, igual ao da corretora).
 const CUR_SYMBOL = { USD:"US$ ", EUR:"€ ", GBP:"£ ", CHF:"CHF ", CAD:"C$ ", JPY:"¥ ", AUD:"A$ " };
+// Bandeira por país de sede fiscal (nome em português, como gravado em trades.pais).
+const COUNTRY_FLAG = {
+  "Portugal":"🇵🇹", "Estados Unidos":"🇺🇸", "Países Baixos":"🇳🇱", "Alemanha":"🇩🇪",
+  "Espanha":"🇪🇸", "Itália":"🇮🇹", "França":"🇫🇷", "Reino Unido":"🇬🇧", "Bélgica":"🇧🇪",
+  "Suíça":"🇨🇭", "Áustria":"🇦🇹", "Finlândia":"🇫🇮", "Irlanda":"🇮🇪", "Luxemburgo":"🇱🇺",
+  "Mercadoria":"🛢️", "Índice":"📊", "Forex":"💱", "Cripto":"₿", "Desconhecido":"🏳️",
+};
+const flag = pais => COUNTRY_FLAG[pais] || "🏳️";
+// Paleta para as fatias do donut por país.
+const PIE_COLORS = ["#4f6af5","#10b981","#f59e0b","#a855f7","#ec4899","#14b8a6","#f43f5e","#6366f1","#84cc16","#06b6d4"];
+// Clareia (p>0) ou escurece (p<0) uma cor hex — usado para gerar o degradê das fatias.
+const shade = (hex, p) => {
+  const n = parseInt(hex.slice(1), 16);
+  const adj = c => Math.max(0, Math.min(255, Math.round(c + 255 * p)));
+  const r = adj((n >> 16) & 255), g = adj((n >> 8) & 255), b = adj(n & 255);
+  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+};
 const fmtOrig = (v, moeda) => {
   if (v == null) return "—";
   const sym = CUR_SYMBOL[moeda] || (moeda ? moeda+" " : "");
@@ -48,6 +66,51 @@ const ChartTooltip = ({ active, payload, label, formatter }) => {
     </div>
   );
 };
+
+// Tooltip do donut "Resumo por país": país, nº de trades, win rate e P&L em euros.
+const CountryTooltip = ({ active, payload }) => {
+  if (!active || !payload?.length) return null;
+  const c = payload[0].payload;
+  const wr = c.n ? c.wins / c.n * 100 : 0;
+  return (
+    <div style={{
+      background: "rgba(13,17,27,0.97)", border: "1px solid #2a3a5c",
+      borderRadius: 8, padding: "9px 14px", fontSize: 12, boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+    }}>
+      <div style={{ fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>{flag(c.pais)} {c.pais}</div>
+      <div style={{ color: MUTE }}>{c.n} trade{c.n !== 1 ? "s" : ""} · {wr.toFixed(1)}% WR</div>
+      <div style={{ fontWeight: 700, color: c.pl >= 0 ? GREEN : RED, marginTop: 2 }}>{fmt(c.pl)}</div>
+    </div>
+  );
+};
+
+// Título de coluna com tooltip de informação ao passar o rato por cima.
+function HeadTip({ label, info }) {
+  const [show, setShow] = useState(false);
+  return (
+    <span
+      style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 4, cursor: "help" }}
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+    >
+      {label}
+      <span style={{
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+        width: 14, height: 14, borderRadius: "50%", border: `1px solid ${MUTE}`,
+        color: MUTE, fontSize: "0.55rem", fontStyle: "italic", fontWeight: 800,
+      }}>i</span>
+      {show && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 7px)", left: "50%", transform: "translateX(-50%)",
+          width: 230, background: "#1e1e2e", border: "1px solid rgba(255,255,255,0.14)",
+          borderRadius: 8, padding: "8px 11px", fontSize: "0.68rem", color: "#c4c4d4",
+          fontWeight: 400, textTransform: "none", whiteSpace: "normal", textAlign: "left",
+          zIndex: 400, lineHeight: 1.5, boxShadow: "0 8px 22px rgba(0,0,0,0.5)",
+        }}>{info}</div>
+      )}
+    </span>
+  );
+}
 
 export default function Statistics() {
   const [anos, setAnos]   = useState([]);
@@ -125,6 +188,27 @@ export default function Statistics() {
   const fxRawTotal   = fxByMoeda.reduce((s, r) => s + r.orig, 0);
   const fxTotalPct   = fxRawTotal ? (fxTotalDelta / Math.abs(fxRawTotal)) * 100 : 0;
 
+  // Resumo por país (sede fiscal do instrumento): agrega os trades fechados por país,
+  // com nº de trades, win rate e P&L total em euros. Exclui classificações que não são
+  // países (subjacentes de CFD: mercadoria/índice/forex/cripto).
+  const NAO_PAIS = new Set(["Mercadoria", "Índice", "Forex", "Cripto"]);
+  const byCountry = Object.values(all.reduce((acc, t) => {
+    const k = t.pais || "Desconhecido";
+    if (NAO_PAIS.has(k)) return acc;
+    const r = acc[k] || (acc[k] = { pais: k, n: 0, wins: 0, pl: 0 });
+    r.n++;
+    if ((t.pl_eur ?? 0) > 0) r.wins++;
+    r.pl += t.pl_eur ?? 0;
+    return acc;
+  }, {})).sort((a, b) => b.pl - a.pl);
+  const countryTotalPl     = byCountry.reduce((s, c) => s + c.pl, 0);
+  const countryTotalTrades = byCountry.reduce((s, c) => s + c.n, 0);
+
+  // Arrays já ordenados/derivados para os gráficos de barras — usar o MESMO array nas
+  // barras e nas <Cell> garante que a cor de cada barra corresponde ao seu valor.
+  const plBySymbol = [...bySymbol].sort((a, b) => a.pl_total - b.pl_total);
+  const wrBySymbol = bySymbol.map(s => ({ ...s, wr: s.n_trades ? s.n_wins / s.n_trades * 100 : 0 }));
+
   const tabs = ["📊 Por instrumento","📅 Por período","🎯 Distribuição"];
 
   return (
@@ -148,40 +232,106 @@ export default function Statistics() {
             <div className="card">
               <div className="section-title">P&L por símbolo</div>
               <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={[...bySymbol].sort((a,b)=>a.pl_total-b.pl_total)} layout="vertical" barSize={12}>
+                <BarChart data={plBySymbol} layout="vertical" barSize={12}>
+                  <defs>
+                    <linearGradient id="barPlGreen" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0%" stopColor={GREEN} stopOpacity={0.3} />
+                      <stop offset="100%" stopColor={GREEN} stopOpacity={0.95} />
+                    </linearGradient>
+                    <linearGradient id="barPlRed" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0%" stopColor={RED} stopOpacity={0.95} />
+                      <stop offset="100%" stopColor={RED} stopOpacity={0.3} />
+                    </linearGradient>
+                  </defs>
                   <XAxis type="number" tick={{fill:MUTE,fontSize:10}} />
                   <YAxis dataKey="simbolo" type="category" tick={{fill:MUTE,fontSize:10}} width={65} />
                   <Tooltip content={<ChartTooltip formatter={v => [fmt(v),"P&L"]} />} cursor={{ fill: "transparent" }} />
                   <ReferenceLine x={0} stroke={MUTE} />
                   <Bar dataKey="pl_total">
-                    {bySymbol.map((s,i) => <Cell key={i} fill={s.pl_total>=0?GREEN:RED} />)}
+                    {plBySymbol.map((s,i) => <Cell key={i} fill={s.pl_total>=0?"url(#barPlGreen)":"url(#barPlRed)"} />)}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
+              <div className="card-footer">Resultado líquido em euros de cada símbolo no ano, ordenado do pior para o melhor.</div>
             </div>
             <div className="card">
               <div className="section-title">Percentagem de ganhos por símbolo</div>
               <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={bySymbol.map(s=>({...s, wr:s.n_wins/s.n_trades*100}))} layout="vertical" barSize={12}>
+                <BarChart data={wrBySymbol} layout="vertical" barSize={12}>
+                  <defs>
+                    <linearGradient id="barWrGreen" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0%" stopColor={GREEN} stopOpacity={0.3} />
+                      <stop offset="100%" stopColor={GREEN} stopOpacity={0.95} />
+                    </linearGradient>
+                    <linearGradient id="barWrRed" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0%" stopColor={RED} stopOpacity={0.3} />
+                      <stop offset="100%" stopColor={RED} stopOpacity={0.95} />
+                    </linearGradient>
+                  </defs>
                   <XAxis type="number" domain={[0,100]} tickFormatter={v=>v+"%"} tick={{fill:MUTE,fontSize:10}} />
                   <YAxis dataKey="simbolo" type="category" tick={{fill:MUTE,fontSize:10}} width={65} />
                   <Tooltip content={<ChartTooltip formatter={v => [v.toFixed(1)+"%","Win Rate"]} />} cursor={{ fill: "transparent" }} />
                   <ReferenceLine x={50} stroke={MUTE} strokeDasharray="4 2" />
                   <Bar dataKey="wr">
-                    {bySymbol.map((s,i)=><Cell key={i} fill={s.n_wins/s.n_trades*100>=50?GREEN:RED} />)}
+                    {wrBySymbol.map((s,i)=><Cell key={i} fill={s.wr>=50?"url(#barWrGreen)":"url(#barWrRed)"} />)}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
+              <div className="card-footer">Percentagem de trades vencedoras por símbolo; a linha a tracejado marca os 50%.</div>
             </div>
           </div>
-          {fxByMoeda.length > 0 && (
-            <div className="card" style={{ marginBottom: 20 }}>
-              <div className="section-title" style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
-                <span>💱 Efeito cambial</span>
-                <span style={{ fontSize: "0.72rem", fontWeight: 400, color: MUTE }}>
-                  diferença entre o P&L na moeda original e o convertido para euro
-                </span>
+          <div className="grid-2" style={{ marginBottom: 20 }}>
+          {byCountry.length > 0 && (
+            <div className="card" style={{ display: "flex", flexDirection: "column" }}>
+              <div className="section-title">🌍 Resumo por país</div>
+              <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
+                {/* Donut */}
+                <div style={{ position: "relative", width: 200, height: 200, flexShrink: 0 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <defs>
+                        {PIE_COLORS.map((c, i) => (
+                          <linearGradient key={i} id={`countryGrad${i}`} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={shade(c, 0.18)} />
+                            <stop offset="100%" stopColor={shade(c, -0.12)} />
+                          </linearGradient>
+                        ))}
+                      </defs>
+                      <Pie data={byCountry} dataKey="n" nameKey="pais" cx="50%" cy="50%"
+                        innerRadius={62} outerRadius={92} paddingAngle={2} stroke="none">
+                        {byCountry.map((c, i) => <Cell key={i} fill={`url(#countryGrad${i % PIE_COLORS.length})`} />)}
+                      </Pie>
+                      <Tooltip content={<CountryTooltip />} wrapperStyle={{ zIndex: 50 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div style={{
+                    position: "absolute", inset: 0, display: "flex", flexDirection: "column",
+                    alignItems: "center", justifyContent: "center", pointerEvents: "none",
+                  }}>
+                    <div style={{ fontSize: "0.62rem", color: MUTE }}>P&L total</div>
+                    <div style={{ fontSize: "1.15rem", fontWeight: 800, color: countryTotalPl >= 0 ? GREEN : RED }}>{fmt(countryTotalPl)}</div>
+                    <div style={{ fontSize: "0.62rem", color: MUTE }}>{countryTotalTrades} trades</div>
+                  </div>
+                </div>
+                {/* Legenda vertical, à direita do donut */}
+                <div style={{ flex: 1, minWidth: 180, display: "flex", flexDirection: "column", gap: 7 }}>
+                  {byCountry.map((c, i) => (
+                    <div key={c.pais} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.75rem" }}>
+                      <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: PIE_COLORS[i % PIE_COLORS.length], flexShrink: 0 }} />
+                      <span>{flag(c.pais)}</span>
+                      <span style={{ color: "var(--text)", fontWeight: 600 }}>{c.pais}</span>
+                      <span style={{ color: MUTE, marginLeft: "auto" }}>{c.n}t · {(c.n ? c.wins / c.n * 100 : 0).toFixed(0)}%</span>
+                      <span style={{ color: c.pl >= 0 ? GREEN : RED, fontWeight: 700, minWidth: 72, textAlign: "right" }}>{fmt(c.pl)}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
+              <div className="card-footer">Distribuição das trades pelo país de sede do instrumento, com P&L e win rate por país.</div>
+            </div>
+          )}
+          {fxByMoeda.length > 0 && (
+            <div className="card">
+              <div className="section-title">💱 Efeito cambial</div>
 
               {/* Destaque: diferença total + % */}
               <div style={{ display: "flex", alignItems: "baseline", gap: 14, margin: "4px 0 16px" }}>
@@ -214,36 +364,36 @@ export default function Statistics() {
                   ))}
                 </tbody>
               </table>
+
+              {/* Rodapé com a explicação do card */}
+              <div className="card-footer">
+                Diferença entre o P&L na moeda original e o convertido para euro
+              </div>
             </div>
           )}
+          </div>
 
           <div className="section-title">Resumo por instrumento</div>
           <table className="data-table no-sticky">
-            <thead><tr><th>Símbolo</th><th>Trades</th><th>Wins</th><th>Win Rate</th><th>P&L Total</th><th>P&L Médio</th></tr></thead>
+            <thead><tr><th>Símbolo</th><th>País</th><th>Trades</th><th>Wins</th><th>Win Rate</th><th><HeadTip label="P&L Total" info="Resultado líquido acumulado (lucros e perdas) de todos os trades fechados deste instrumento, convertido para euros." /></th><th>P&L Médio</th></tr></thead>
             <tbody>
               {bySymbol.map(s => {
+                // Instrumentos em moeda ≠ EUR mostram o valor na moeda original e, entre
+                // parênteses, o convertido para euro. O efeito cambial agregado está no
+                // card "💱 Efeito cambial" (mais claro do que por instrumento).
                 const naoEur = s.moeda && s.moeda !== "EUR";
-                // Diferença cambial: quanto a conversão para € alterou o resultado face ao
-                // valor na moeda original. O % é igual para Total e Médio (avg = total/n).
-                const fxTotal = naoEur ? (s.pl_total ?? 0) - (s.pl_total_orig ?? 0) : 0;
-                const fxAvg   = naoEur ? (s.avg_pl   ?? 0) - (s.avg_pl_orig   ?? 0) : 0;
-                const fxPct   = naoEur && s.pl_total_orig ? (fxTotal / Math.abs(s.pl_total_orig)) * 100 : 0;
-                const fxLine = delta => (
-                  <div style={{fontSize:"0.71rem",marginTop:2,fontWeight:600,color:delta>=0?GREEN:RED}}>
-                    câmbio {fmtSigned(delta)} · {(fxPct>=0?"+":"")+fxPct.toFixed(2)}%
-                  </div>
-                );
                 return (
                   <tr key={s.simbolo}>
                     <td style={{fontWeight:700,color:"var(--text)"}}>{s.simbolo}</td>
+                    <td style={{whiteSpace:"nowrap"}}><span style={{marginRight:6}}>{flag(s.pais)}</span>{s.pais || "—"}</td>
                     <td>{s.n_trades}</td>
                     <td>{s.n_wins}</td>
                     <td>{(s.n_wins/s.n_trades*100).toFixed(1)}%</td>
                     <td style={{color:s.pl_total>=0?GREEN:RED,whiteSpace:"nowrap"}}>
-                      {naoEur ? <><strong>{fmtOrig(s.pl_total_orig, s.moeda)}</strong> <span style={{color:MUTE,fontWeight:600}}>({fmt(s.pl_total)})</span>{fxLine(fxTotal)}</> : <strong>{fmt(s.pl_total)}</strong>}
+                      {naoEur ? <><strong>{fmtOrig(s.pl_total_orig, s.moeda)}</strong> <span style={{color:MUTE,fontWeight:600}}>({fmt(s.pl_total)})</span></> : <strong>{fmt(s.pl_total)}</strong>}
                     </td>
                     <td style={{color:s.avg_pl>=0?GREEN:RED,whiteSpace:"nowrap"}}>
-                      {naoEur ? <><strong>{fmtOrig(s.avg_pl_orig, s.moeda)}</strong> <span style={{color:MUTE}}>({fmt(s.avg_pl)})</span>{fxLine(fxAvg)}</> : fmt(s.avg_pl)}
+                      {naoEur ? <><strong>{fmtOrig(s.avg_pl_orig, s.moeda)}</strong> <span style={{color:MUTE}}>({fmt(s.avg_pl)})</span></> : fmt(s.avg_pl)}
                     </td>
                   </tr>
                 );
@@ -274,6 +424,7 @@ export default function Statistics() {
                   </div>
                 );
               })}
+              <div className="card-footer">Resultado e taxa de acerto por tipo de instrumento (ações, CFDs e opções).</div>
             </div>
             <div className="card">
               <div className="section-title">Métricas de risco</div>
@@ -291,6 +442,7 @@ export default function Statistics() {
                   <span style={{fontWeight:700,color:c}}>{v}</span>
                 </div>
               ))}
+              <div className="card-footer">Indicadores de risco e desempenho do ano: factor de lucro, rácio risco/benefício, médias e extremos.</div>
             </div>
           </div>
         </>
@@ -298,24 +450,34 @@ export default function Statistics() {
 
       {tab === 2 && (
         <div className="grid-2">
-          <div className="card">
+          <div className="card" style={{ display: "flex", flexDirection: "column" }}>
             <div style={{ marginBottom: 14 }}>
-              <div className="section-title" style={{ color: "var(--text)", margin: 0 }}>Distribuição de P&L por Trade</div>
+              <div className="section-title" style={{ margin: 0 }}>Distribuição de P&L por Trade</div>
               <div style={{ fontSize: "0.7rem", color: MUTE, marginTop: 4 }}>Ano {ano}</div>
             </div>
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={bins} barSize={10}>
+                <defs>
+                  <linearGradient id="barHistGreen" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={GREEN} stopOpacity={0.95} />
+                    <stop offset="100%" stopColor={GREEN} stopOpacity={0.3} />
+                  </linearGradient>
+                  <linearGradient id="barHistRed" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={RED} stopOpacity={0.95} />
+                    <stop offset="100%" stopColor={RED} stopOpacity={0.3} />
+                  </linearGradient>
+                </defs>
                 <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
                 <XAxis dataKey="bin" tick={{fill:MUTE,fontSize:9}} />
                 <YAxis tick={{fill:MUTE,fontSize:10}} />
                 <Tooltip content={<ChartTooltip formatter={v=>[v+" trades","Frequência"]} />} cursor={{ fill: "transparent" }} />
                 <ReferenceLine x="0" stroke="rgba(255,255,255,0.22)" />
                 <Bar dataKey="count" style={{ cursor: "pointer" }} onClick={openBin}>
-                  {bins.map((b,i)=><Cell key={i} fill={b.pl>=0?GREEN:RED} />)}
+                  {bins.map((b,i)=><Cell key={i} fill={b.pl>=0?"url(#barHistGreen)":"url(#barHistRed)"} />)}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
-            <div style={{ borderTop: "1px dashed rgba(255,255,255,0.1)", marginTop: 12, paddingTop: 10, display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ borderTop: "1px dashed rgba(255,255,255,0.1)", marginTop: "auto", paddingTop: 10, display: "flex", alignItems: "center", gap: 12 }}>
               <div style={{ flex: 1, fontSize: "0.67rem", color: MUTE, lineHeight: 1.6 }}>
                 Frequência de trades agrupadas por intervalo de P&L em <span style={{ color: "var(--text)", fontWeight: 600 }}>Ano {ano}</span>. Barras a <span style={{ color: GREEN, fontWeight: 600 }}>verde</span> representam trades lucrativas, a <span style={{ color: RED, fontWeight: 600 }}>vermelho</span> trades com prejuízo. Clica numa barra para ver as trades desse intervalo.
               </div>
@@ -335,9 +497,9 @@ export default function Statistics() {
               </button>
             </div>
           </div>
-          <div className="card">
+          <div className="card" style={{ display: "flex", flexDirection: "column" }}>
             <div style={{ marginBottom: 14 }}>
-              <div className="section-title" style={{ color: "var(--text)", margin: 0 }}>Dispersão de Trades</div>
+              <div className="section-title" style={{ margin: 0 }}>Dispersão de Trades</div>
               <div style={{ fontSize: "0.7rem", color: MUTE, marginTop: 4 }}>Ano {ano}</div>
             </div>
             <ResponsiveContainer width="100%" height={260}>
@@ -353,7 +515,7 @@ export default function Statistics() {
                   onClick={d => setModal({ title: `📌 ${d.simbolo} — ${d.data_fecho?.slice(0,10)??""}`, trades: [d], brokers: brokerTotals([d]), summary: { label: "1 trade", value: d.pl_eur??0 } })} />
               </ScatterChart>
             </ResponsiveContainer>
-            <div style={{ borderTop: "1px dashed rgba(255,255,255,0.1)", marginTop: 12, paddingTop: 10, display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ borderTop: "1px dashed rgba(255,255,255,0.1)", marginTop: "auto", paddingTop: 10, display: "flex", alignItems: "center", gap: 12 }}>
               <div style={{ flex: 1, fontSize: "0.67rem", color: MUTE, lineHeight: 1.6 }}>
                 Cada ponto representa uma trade do <span style={{ color: "var(--text)", fontWeight: 600 }}>Ano {ano}</span>. Pontos a <span style={{ color: GREEN, fontWeight: 600 }}>verde</span> são trades lucrativas, a <span style={{ color: RED, fontWeight: 600 }}>vermelho</span> com prejuízo. Clica num ponto para ver o detalhe da trade.
               </div>

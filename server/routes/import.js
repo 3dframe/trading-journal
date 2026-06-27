@@ -4,6 +4,7 @@ const path     = require("path");
 const fs       = require("fs");
 const ExcelJS  = require("exceljs");
 const fx       = require("../fx");
+const quotes   = require("../quotes");
 const { getDb, clearDb } = require("../db");
 
 const router   = express.Router();
@@ -898,6 +899,85 @@ async function parseIBKR(buffer) {
   return { trades, dividends, deposits, convFailed, holdings };
 }
 
+// ── Parser Bybit (.csv) — assetHistory / withdrawDepositHistory ──
+// Relatório de transferências (depósitos/levantamentos) de cripto da Bybit. NÃO traz
+// trades nem preços de compra — apenas quantidades por ativo. Agregamos por ativo
+// (depósitos somam, levantamentos subtraem) e valorizamos a mercado (Yahoo <ATIVO>-EUR)
+// como posições em carteira (categoria CRYPTO). Sem trades nem depósitos de caixa: o
+// utilizador está em "hold", por isso só interessam as posições resultantes.
+async function parseBybit(buffer) {
+  const text  = buffer.toString("utf8");
+  const lines = text.split(/\r?\n/).filter(l => l.trim() !== "");
+  if (!lines.length) throw new Error("Ficheiro Bybit vazio.");
+
+  // 1ª linha traz UID/Name: "UID: 548..., Name: PAULO ..., Company Name: , Country: "
+  let accountNumber = null, accountName = null;
+  if (/uid\s*:/i.test(lines[0])) {
+    const muid = lines[0].match(/UID:\s*([^,]+)/i);
+    const mnam = lines[0].match(/Name:\s*([^,]*)/i);
+    accountNumber = muid ? muid[1].trim() : null;
+    accountName   = mnam ? (mnam[1].trim() || null) : null;
+  }
+
+  // Linha de cabeçalho das colunas (contém "Type" e "Asset")
+  const headerIdx = lines.findIndex(l => /(^|,)\s*type\s*(,|$)/i.test(l) && /asset/i.test(l));
+  if (headerIdx < 0) throw new Error("Cabeçalho de colunas não encontrado no ficheiro Bybit.");
+  const headers = parseCSVLine(lines[headerIdx]).map(h => h.toLowerCase().trim());
+  const idx = name => headers.indexOf(name);
+  const iType = idx("type"), iAsset = idx("asset"), iAmount = idx("amount"), iStatus = idx("status");
+  if (iAsset < 0 || iAmount < 0)
+    throw new Error("Colunas Asset/Amount não encontradas no ficheiro Bybit.");
+
+  // Agrega por ativo: depósitos somam, levantamentos subtraem (só linhas "Completed").
+  const byAsset = new Map();
+  for (let r = headerIdx + 1; r < lines.length; r++) {
+    const cols  = parseCSVLine(lines[r]);
+    const asset = (cols[iAsset] || "").toUpperCase().trim();
+    if (!asset) continue;
+    const status = (iStatus >= 0 ? cols[iStatus] : "").toLowerCase();
+    if (status && status !== "completed") continue;
+    const type   = (iType >= 0 ? cols[iType] : "").toLowerCase();
+    const amount = toFloat(cols[iAmount]);
+    if (!amount) continue;
+    const signed = type.includes("withdraw") ? -Math.abs(amount) : Math.abs(amount);
+    byAsset.set(asset, (byAsset.get(asset) || 0) + signed);
+  }
+
+  // Cotações de mercado em EUR (Yahoo: <ATIVO>-EUR). Stablecoins (USDC/USDT) também têm par.
+  const assets  = [...byAsset.keys()].filter(a => (byAsset.get(a) || 0) > 1e-12);
+  let quoteMap = {};
+  try { quoteMap = await quotes.getQuotes(assets.map(a => `${a}-EUR`)); } catch { quoteMap = {}; }
+
+  const holdings   = [];
+  const convFailed = [];
+  for (const asset of assets) {
+    const qty   = byAsset.get(asset);
+    const price = quoteMap[`${asset}-EUR`]?.price ?? null;     // por unidade (EUR)
+    if (price == null) convFailed.push(asset);
+    holdings.push({
+      simbolo:     asset,
+      nome:        asset,
+      categoria:   "CRYPTO",
+      moeda:       "EUR",
+      pais:        null,                                       // cripto não tem país de incorporação
+      quantidade:  qty,
+      preco_medio: null,                                       // o relatório não traz preço de compra
+      custo_eur:   null,
+      preco_atual: price,
+      valor_eur:   price != null ? +(qty * price).toFixed(2) : null,
+      pl_eur:      null,                                       // sem custo → P/L não realizado desconhecido
+      corretora:   "Bybit",
+      conta:       accountNumber,
+      conta_nome:  accountName,
+    });
+  }
+
+  if (!holdings.length)
+    throw new Error("Nenhum ativo com saldo positivo encontrado no ficheiro Bybit.");
+
+  return { trades: [], dividends: [], deposits: [], convFailed, holdings };
+}
+
 // ── Contar duplicados sem gravar (para a pré-visualização) ────
 function countExisting(username, trades, dividends, deposits = []) {
   const db = getDb(username);
@@ -1075,6 +1155,8 @@ router.post("/preview", upload.single("file"), async (req, res) => {
       ({ trades, dividends, deposits, convFailed = [], holdings = [] } = await parseXTB(req.file.buffer, req.file.originalname));
     } else if (tipo === "ibkr") {
       ({ trades, dividends, deposits, convFailed = [], holdings = [] } = await parseIBKR(req.file.buffer));
+    } else if (tipo === "bybit") {
+      ({ trades, dividends, deposits, convFailed = [], holdings = [] } = await parseBybit(req.file.buffer));
     } else {
       return res.status(400).json({ error: "Tipo inválido." });
     }
@@ -1106,6 +1188,8 @@ router.post("/confirm", upload.single("file"), async (req, res) => {
       ({ trades, dividends, deposits, convFailed = [], holdings = [] } = await parseXTB(req.file.buffer, req.file.originalname));
     } else if (tipo === "ibkr") {
       ({ trades, dividends, deposits, convFailed = [], holdings = [] } = await parseIBKR(req.file.buffer));
+    } else if (tipo === "bybit") {
+      ({ trades, dividends, deposits, convFailed = [], holdings = [] } = await parseBybit(req.file.buffer));
     } else {
       return res.status(400).json({ error: "Tipo inválido." });
     }

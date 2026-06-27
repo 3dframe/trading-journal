@@ -375,6 +375,17 @@ html, body, #root {
   text-transform: uppercase; letter-spacing: .1em; margin: 20px 0 12px;
 }
 .card > .section-title:first-child { margin-top: 0; }
+/* Títulos de cards a branco */
+.card .section-title { color: #ffffff; }
+
+/* Rodapé de card: texto cinza claro, separado por linha tracejada e encostado ao fundo */
+.card-footer {
+  margin-top: auto; padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  font-size: 0.82rem; color: #9ca3af; line-height: 1.55;
+}
+/* Qualquer card com rodapé passa a coluna flex para o rodapé poder encostar ao fundo */
+.card:has(> .card-footer) { display: flex; flex-direction: column; }
 
 /* ── CARD ─────────────────────────────────────────────────── */
 .card {

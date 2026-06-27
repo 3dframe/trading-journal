@@ -15,7 +15,15 @@ const BROKERS = [
     color: "#4f6af5", colorBg: "rgba(79,106,245,0.08)",
     hint: "Reports → Activity Statement → Exportar CSV",
   },
+  {
+    id: "bybit", label: "Bybit", ext: ".csv", accept: ".csv",
+    color: "#f7a600", colorBg: "rgba(247,166,0,0.08)",
+    hint: "Assets → Histórico de Depósitos/Levantamentos → Exportar CSV",
+  },
 ];
+
+// Emoji de cada corretora (cartão de drop e cartão do ficheiro selecionado).
+const BROKER_EMOJI = { xtb: "📊", ibkr: "📋", bybit: "₿" };
 
 function DropCard({ broker, onFile }) {
   const [dragging, setDragging] = useState(false);
@@ -52,7 +60,7 @@ function DropCard({ broker, onFile }) {
         background: broker.colorBg, border: `1.5px solid ${broker.color}33`,
         display: "flex", alignItems: "center", justifyContent: "center",
       }}>
-        <span style={{ fontSize: "1.5rem" }}>{broker.id === "xtb" ? "📊" : "📋"}</span>
+        <span style={{ fontSize: "1.5rem" }}>{BROKER_EMOJI[broker.id] || "📋"}</span>
       </div>
       <div style={{ fontWeight: 800, fontSize: "1.1rem", color: broker.color, marginBottom: 4 }}>
         {broker.label}
@@ -72,7 +80,7 @@ function DropCard({ broker, onFile }) {
   );
 }
 
-const BROKER_COLOR = { XTB: "#f59e0b", IBKR: "#4f6af5" };
+const BROKER_COLOR = { XTB: "#f59e0b", IBKR: "#4f6af5", BYBIT: "#f7a600", Bybit: "#f7a600" };
 
 function SectionTitle({ children }) {
   return (
@@ -258,7 +266,7 @@ export default function Import() {
             width: 44, height: 44, borderRadius: 12, flexShrink: 0,
             background: broker.colorBg, border: `1.5px solid ${broker.color}33`,
             display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.3rem",
-          }}>{broker.id === "xtb" ? "📊" : "📋"}</div>
+          }}>{BROKER_EMOJI[broker.id] || "📋"}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 700, color: broker.color, fontSize: "0.78rem", marginBottom: 2 }}>
               {broker.label}
@@ -311,8 +319,8 @@ export default function Import() {
                 <span>📊 <strong style={{ color: "var(--text)" }}>{preview.nHoldings}</strong> posições abertas detetadas</span>}
             </div>
             {(() => {
-              const totalNovas = (preview.nTradesNovas ?? preview.nTrades) + (preview.nDividendsNovas ?? preview.nDividends) + (preview.nDepositsNovas ?? preview.nDeposits);
-              const totalFicheiro = preview.nTrades + preview.nDividends + preview.nDeposits;
+              const totalNovas = (preview.nTradesNovas ?? preview.nTrades) + (preview.nDividendsNovas ?? preview.nDividends) + (preview.nDepositsNovas ?? preview.nDeposits) + (preview.nHoldings ?? 0);
+              const totalFicheiro = preview.nTrades + preview.nDividends + preview.nDeposits + (preview.nHoldings ?? 0);
               const totalDuplicadas = totalFicheiro - totalNovas;
               if (totalDuplicadas <= 0) return null;
               const dups = preview.dupItems || [];
@@ -411,7 +419,7 @@ export default function Import() {
           )}
 
           {(() => {
-            const totalNovas = (preview.nTradesNovas ?? preview.nTrades) + (preview.nDividendsNovas ?? preview.nDividends) + (preview.nDepositsNovas ?? preview.nDeposits);
+            const totalNovas = (preview.nTradesNovas ?? preview.nTrades) + (preview.nDividendsNovas ?? preview.nDividends) + (preview.nDepositsNovas ?? preview.nDeposits) + (preview.nHoldings ?? 0);
             return (
               <div style={{ display: "flex", gap: 10 }}>
                 {totalNovas === 0 ? (
