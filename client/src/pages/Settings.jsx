@@ -199,7 +199,7 @@ export default function Settings({ user, fullName, onFullNameChange }) {
       {confirmModal && (
         <div style={{
           position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999,
-          background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center",
+          background: "rgba(0,0,0,0.72)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center",
         }}>
           <div style={{
             background: "var(--card)", border: "1px solid var(--border)", borderRadius: 16,
@@ -225,7 +225,7 @@ export default function Settings({ user, fullName, onFullNameChange }) {
                 onClick={confirmModal.onConfirm}
                 disabled={savingPw}
                 style={{
-                  background: "#ef4444", color: "#fff", border: "none",
+                  background: "var(--accent)", color: "#fff", border: "none",
                   borderRadius: 8, padding: "9px 18px", fontSize: "0.84rem", fontWeight: 600, cursor: "pointer",
                   opacity: savingPw ? 0.5 : 1,
                 }}

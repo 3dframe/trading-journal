@@ -37,14 +37,16 @@ const shade = (hex, p) => {
 // As categorias são detetadas automaticamente a partir dos dados — se aparecer
 // uma categoria nova no relatório (ex.: FUTURE), o card mostra-a na mesma,
 // usando o rótulo/cor/emoji por defeito (ver prettyCat / CAT_FALLBACK_COLORS).
+// `grad: [topo, fundo]` define o degradê das fatias do donut; `color` é a cor sólida
+// usada na legenda e nos mini-donuts (representa a categoria).
 const CAT_META = {
-  STOCK:  { label: "Ações",      color: BLUE,      emoji: "📈" },
+  STOCK:  { label: "Ações",      color: "#7FB3FF", grad: ["#7FB3FF", "#A7CCFF"], emoji: "📈" },
   OPTION: { label: "Opções",     color: PINK,      emoji: "🎯" },
-  CFD:    { label: "CFDs",       color: AMBER,     emoji: "⚡" },
-  FUTURE: { label: "Futuros",    color: PURPLE,    emoji: "📊" },
-  FUT:    { label: "Futuros",    color: PURPLE,    emoji: "📊" },
+  CFD:    { label: "CFDs",       color: "#F28F8F", grad: ["#F28F8F", "#F5B3B3"], emoji: "⚡" },
+  FUTURE: { label: "Futuros",    color: "#C9A3E6", grad: ["#C9A3E6", "#DCC4F2"], emoji: "📊" },
+  FUT:    { label: "Futuros",    color: "#C9A3E6", grad: ["#C9A3E6", "#DCC4F2"], emoji: "📊" },
   FOREX:  { label: "Forex",      color: "#22d3ee", emoji: "💱" },
-  CRYPTO: { label: "Cripto",     color: "#f59e0b", emoji: "₿" },
+  CRYPTO: { label: "Cripto",     color: "#FFA94D", grad: ["#FFA94D", "#FFD580"], emoji: "₿" },
   BOND:   { label: "Obrigações", color: "#94a3b8", emoji: "📜" },
 };
 // Cores atribuídas por ordem de aparição a categorias sem entrada em CAT_META.
@@ -576,7 +578,7 @@ export default function Dashboard({ user }) {
       const color = meta.color || CAT_FALLBACK_COLORS[_fallbackColorIdx++ % CAT_FALLBACK_COLORS.length];
       const label = meta.label || prettyCat(cat);
       const emoji = meta.emoji || "📂";
-      return { label, color, value: st.pl, n: st.n, onClick: () => openCategory(cat, label, emoji) };
+      return { label, color, grad: meta.grad, value: st.pl, n: st.n, onClick: () => openCategory(cat, label, emoji) };
     })
     .filter(c => c.n > 0)
     .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
@@ -585,8 +587,8 @@ export default function Dashboard({ user }) {
   const nDividendos = allDivs.filter(d => d.tipo !== "INTEREST").length;
   const nJuros      = allDivs.filter(d => d.tipo === "INTEREST").length;
   const incomeCats  = [
-    { label: "Dividendos", color: GREEN, value: dividendsLiq, onClick: openDivs,     show: dividendsLiq !== 0 },
-    { label: "Juros",      color: TEAL,  value: interestLiq,  onClick: openInterest, show: interestLiq !== 0 },
+    { label: "Dividendos", color: "#8FD8B0", grad: ["#8FD8B0", "#B8E8CC"], value: dividendsLiq, onClick: openDivs,     show: dividendsLiq !== 0 },
+    { label: "Juros",      color: "#AEB5C0", grad: ["#AEB5C0", "#C9CED6"], value: interestLiq,  onClick: openInterest, show: interestLiq !== 0 },
   ].filter(c => c.show);
 
   // Criptomoedas em "hold" (posições Bybit) — sem trades fechados, entram na repartição
@@ -594,7 +596,7 @@ export default function Dashboard({ user }) {
   const cryptoHoldings = holdings.filter(h => h.categoria === "CRYPTO");
   const cryptoValue    = cryptoHoldings.reduce((s, h) => s + (h.valor_eur || 0), 0);
   const cryptoCat      = cryptoValue !== 0
-    ? [{ label: "Criptomoedas", color: CAT_META.CRYPTO.color, value: cryptoValue }]
+    ? [{ label: "Criptomoedas", color: CAT_META.CRYPTO.color, grad: CAT_META.CRYPTO.grad, value: cryptoValue }]
     : [];
 
   // Repartição completa (trades + rendimento + cripto em carteira) — partilhada pelo donut
@@ -713,7 +715,7 @@ export default function Dashboard({ user }) {
     <div>
       {/* ── Header (desliza com a página, como nas outras) ── */}
       <div className="page-header">
-        <div className="page-title">Visão Geral</div>
+        <div className="page-title">Diário de Trading</div>
         <div className="page-sub">Resumo do desempenho e da sua atividade de trading</div>
       </div>
 
@@ -941,8 +943,8 @@ export default function Dashboard({ user }) {
                     <defs>
                       {catBreakdown.map((c, i) => (
                         <linearGradient key={i} id={`catGrad${i}`} x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor={shade(c.color, 0.18)} />
-                          <stop offset="100%" stopColor={shade(c.color, -0.12)} />
+                          <stop offset="0%"   stopColor={c.grad ? c.grad[0] : shade(c.color, 0.18)} />
+                          <stop offset="100%" stopColor={c.grad ? c.grad[1] : shade(c.color, -0.12)} />
                         </linearGradient>
                       ))}
                     </defs>
@@ -972,7 +974,7 @@ export default function Dashboard({ user }) {
                       onMouseEnter={e => e.currentTarget.style.background = "var(--hover)"}
                       onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                       <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                        <span style={{ width: 10, height: 10, borderRadius: 3, background: c.color, flexShrink: 0 }} />
+                        <span style={{ width: 10, height: 10, borderRadius: 3, background: c.grad ? `linear-gradient(180deg, ${c.grad[0]}, ${c.grad[1]})` : c.color, flexShrink: 0 }} />
                         <span style={{ fontSize: "0.84rem", color: "var(--text)" }}>{c.label}</span>
                       </span>
                       <span style={{ fontSize: "0.8rem", fontWeight: 700, color: c.value >= 0 ? GREEN : RED, whiteSpace: "nowrap" }}>

@@ -63,11 +63,9 @@ const DocIcon = () => (
     <line x1="9" y1="17" x2="15" y2="17"/>
   </svg>
 );
-const MenuIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-    <line x1="3" y1="6"  x2="21" y2="6"/>
-    <line x1="3" y1="12" x2="21" y2="12"/>
-    <line x1="3" y1="18" x2="21" y2="18"/>
+const CollapseIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="15 18 9 12 15 6"/>
   </svg>
 );
 
@@ -165,17 +163,15 @@ export default function App() {
         onMouseEnter={() => collapsed && setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
-        {/* Hamburger + título */}
-        <div className="sidebar-ham-area">
-          <button
-            className="sidebar-ham-btn"
-            onClick={toggleCollapse}
-            title={collapsed && !hovered ? "Expandir menu" : "Colapsar menu"}
-          >
-            <MenuIcon />
-          </button>
-          <span className="sidebar-text sidebar-ham-title">Diário de Trading</span>
-        </div>
+        {/* Utilizador no topo (encolhido mostra só o avatar) */}
+        <UserMenu
+          variant="sidebar"
+          iconOnly={collapsed && !hovered}
+          fullName={fullName} username={user} isAdmin={isAdmin}
+          darkMode={darkMode} onToggleTheme={toggleTheme}
+          onLogout={logout} onOpenSettings={() => navigateTo("settings")}
+          onOpenAdmin={isAdmin ? () => navigateTo("admin") : undefined}
+        />
 
         {/* Nav */}
         <nav className="sidebar-nav">
@@ -194,6 +190,18 @@ export default function App() {
           ))}
         </nav>
 
+        {/* Colapsar / expandir (no fundo, sempre visível) */}
+        <button
+          className="sidebar-collapse-btn"
+          onClick={toggleCollapse}
+          title={collapsed && !hovered ? "Expandir menu" : "Colapsar menu"}
+        >
+          <span style={{ display: "inline-flex", transition: "transform .2s", transform: collapsed ? "rotate(180deg)" : "none" }}>
+            <CollapseIcon />
+          </span>
+          <span className="sidebar-text">Colapsar menu</span>
+        </button>
+
         {/* Copyright */}
         <div className="sidebar-copyright sidebar-text">
           © {new Date().getFullYear()} Diário de Trading<br />
@@ -203,15 +211,6 @@ export default function App() {
 
       {/* ── Right side ──────────────────────────────────── */}
       <div className={`layout-right${collapsed ? " collapsed" : ""}`}>
-        {/* Barra de topo: menu de utilizador (fixa, fora da área de scroll) */}
-        <div className="topbar">
-          <UserMenu
-            fullName={fullName} username={user} isAdmin={isAdmin}
-            darkMode={darkMode} onToggleTheme={toggleTheme}
-            onLogout={logout} onOpenSettings={() => navigateTo("settings")}
-            onOpenAdmin={isAdmin ? () => navigateTo("admin") : undefined}
-          />
-        </div>
         <main className="main-content">
           {pageLoading && (
             <div style={{

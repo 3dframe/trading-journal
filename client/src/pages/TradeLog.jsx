@@ -410,7 +410,7 @@ export default function TradeLog() {
   };
 
   return (
-    <div style={{ height: "calc(100vh - 56px - var(--topbar-h))", display: "flex", flexDirection: "column" }}>
+    <div style={{ height: "calc(100vh - 56px)", display: "flex", flexDirection: "column" }}>
       <div className="page-header" style={{
         display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0,
       }}>

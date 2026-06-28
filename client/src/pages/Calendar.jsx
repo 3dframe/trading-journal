@@ -507,7 +507,7 @@ export default function Calendar() {
             <button key={v} onClick={() => setView(v)}
               style={{ padding: "5px 14px", borderRadius: 6, fontSize: "0.78rem", fontWeight: 600,
                 fontFamily: "var(--font)", cursor: "pointer",
-                background: view === v ? G : "transparent",
+                background: view === v ? B : "transparent",
                 color:      view === v ? "#fff" : MUT,
                 border: "none", transition: "all .15s", textTransform: "uppercase", letterSpacing: ".04em" }}>
               {v === "year" ? "Ano" : v === "month" ? "Mês" : "Semana"}
