@@ -6,9 +6,39 @@ const ExcelJS  = require("exceljs");
 const fx       = require("../fx");
 const quotes   = require("../quotes");
 const { getDb, clearDb } = require("../db");
+const { cryptoName } = require("../crypto-names");
 
 const router   = express.Router();
 const DATA_DIR = path.join(__dirname, "..", "data");
+
+// Normaliza várias formas de data para YYYY-MM-DD (ISO, DD-MM-YYYY, DD/MM/YYYY, timestamps).
+function toYMD(s) {
+  if (!s) return null;
+  const str = String(s).trim();
+  let m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = str.match(/^(\d{2})[-/](\d{2})[-/](\d{4})/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  const d = new Date(str);
+  return isNaN(d) ? null : d.toISOString().slice(0, 10);
+}
+
+// Período (data mínima/máxima) a que o ficheiro importado respeita, a partir de todas as
+// datas presentes (trades, dividendos, depósitos e movimentos das posições/cripto).
+function computePeriod(trades = [], dividends = [], deposits = [], holdings = []) {
+  const dates = [];
+  const push = s => { const y = toYMD(s); if (y) dates.push(y); };
+  trades.forEach(t => { push(t.data_abertura); push(t.data_fecho); });
+  dividends.forEach(d => push(d.data_pagamento));
+  deposits.forEach(d => push(d.data));
+  holdings.forEach(h => {
+    let movs = []; try { movs = JSON.parse(h.movimentos || "[]"); } catch { movs = []; }
+    movs.forEach(m => push(m.data));
+  });
+  if (!dates.length) return { de: null, ate: null };
+  dates.sort();
+  return { de: dates[0], ate: dates[dates.length - 1] };
+}
 
 const USERS_FILE = path.join(__dirname, "..", "users.json");
 function loadUsers() {
@@ -927,9 +957,14 @@ async function parseBybit(buffer) {
   const iType = idx("type"), iAsset = idx("asset"), iAmount = idx("amount"), iStatus = idx("status");
   if (iAsset < 0 || iAmount < 0)
     throw new Error("Colunas Asset/Amount não encontradas no ficheiro Bybit.");
+  // Colunas opcionais para o histórico linha-a-linha (data e ID da transação).
+  const iTime = headers.findIndex(h => h.includes("time") || h.includes("date"));
+  const iTxid = headers.findIndex(h => h.includes("tx") || h.includes("transaction") || h === "id");
 
   // Agrega por ativo: depósitos somam, levantamentos subtraem (só linhas "Completed").
+  // Guarda também cada movimento (para o histórico mostrado no modal).
   const byAsset = new Map();
+  const movsByAsset = new Map();
   for (let r = headerIdx + 1; r < lines.length; r++) {
     const cols  = parseCSVLine(lines[r]);
     const asset = (cols[iAsset] || "").toUpperCase().trim();
@@ -941,6 +976,13 @@ async function parseBybit(buffer) {
     if (!amount) continue;
     const signed = type.includes("withdraw") ? -Math.abs(amount) : Math.abs(amount);
     byAsset.set(asset, (byAsset.get(asset) || 0) + signed);
+    if (!movsByAsset.has(asset)) movsByAsset.set(asset, []);
+    movsByAsset.get(asset).push({
+      id:   iTxid >= 0 ? (cols[iTxid] || null) : null,
+      tipo: signed < 0 ? "Levantamento" : "Depósito",
+      data: iTime >= 0 ? (cols[iTime] || null) : null,
+      qtd:  signed,                                    // quantidade na moeda (cripto), com sinal
+    });
   }
 
   // Cotações de mercado em EUR (Yahoo: <ATIVO>-EUR). Stablecoins (USDC/USDT) também têm par.
@@ -956,7 +998,7 @@ async function parseBybit(buffer) {
     if (price == null) convFailed.push(asset);
     holdings.push({
       simbolo:     asset,
-      nome:        asset,
+      nome:        cryptoName(asset),
       categoria:   "CRYPTO",
       moeda:       "EUR",
       pais:        null,                                       // cripto não tem país de incorporação
@@ -969,6 +1011,7 @@ async function parseBybit(buffer) {
       corretora:   "Bybit",
       conta:       accountNumber,
       conta_nome:  accountName,
+      movimentos:  JSON.stringify(movsByAsset.get(asset) || []),
     });
   }
 
@@ -1112,8 +1155,8 @@ function saveData(username, trades, dividends, deposits = [], holdings = []) {
         `DELETE FROM posicoes WHERE corretora = ? AND (conta = ? OR (conta IS NULL AND ? IS NULL))`);
       const insPos = db.prepare(`INSERT INTO posicoes
         (simbolo, nome, categoria, moeda, pais, quantidade, preco_medio, custo_eur,
-         preco_atual, valor_eur, pl_eur, corretora, conta, conta_nome, atualizado_em)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+         preco_atual, valor_eur, pl_eur, corretora, conta, conta_nome, atualizado_em, movimentos)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
       const now = new Date().toISOString();
       const cleared = new Set();
       for (const h of holdings) {
@@ -1123,7 +1166,7 @@ function saveData(username, trades, dividends, deposits = [], holdings = []) {
           h.simbolo, h.nome ?? null, h.categoria ?? null, h.moeda ?? null, h.pais ?? null,
           h.quantidade ?? null, h.preco_medio ?? null, h.custo_eur ?? null,
           h.preco_atual ?? null, h.valor_eur ?? null, h.pl_eur ?? null,
-          h.corretora, h.conta ?? null, h.conta_nome ?? null, now
+          h.corretora, h.conta ?? null, h.conta_nome ?? null, now, h.movimentos ?? null
         );
       }
     }
@@ -1168,6 +1211,7 @@ router.post("/preview", upload.single("file"), async (req, res) => {
       nTrades: trades.length, nDividends: dividends.length, nDeposits: deposits.length, nHoldings: holdings.length,
       nTradesNovas: trades.length - dupTrades, nDividendsNovas: dividends.length - dupDividends, nDepositsNovas: deposits.length - dupDeposits,
       dupItems, convFailed, preview: trades.slice(0, 5), contas, contaNomes,
+      periodo: computePeriod(trades, dividends, deposits, holdings),
     });
   } catch (e) {
     res.status(422).json({ error: e.message });
@@ -1197,14 +1241,17 @@ router.post("/confirm", upload.single("file"), async (req, res) => {
     const allRows  = [...trades, ...dividends, ...deposits];
     const contas     = [...new Set(allRows.map(x => x.conta).filter(Boolean))].join(", ") || null;
     const contaNomes = [...new Set(allRows.map(x => x.conta_nome).filter(Boolean))].join(", ") || null;
+    const periodo = computePeriod(trades, dividends, deposits, holdings);
     const db = getDb(req.session.user.username);
-    db.prepare(`INSERT INTO import_history (filename, corretora, n_trades, n_dividends, n_skipped, conta, conta_nome)
-      VALUES (?,?,?,?,?,?,?)`)
-      .run(req.file.originalname, tipo.toUpperCase(), stats.insertedTrades, stats.insertedDivs, stats.skipped, contas, contaNomes);
+    db.prepare(`INSERT INTO import_history
+      (filename, corretora, n_trades, n_dividends, n_skipped, conta, conta_nome, n_holdings, periodo_de, periodo_ate)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`)
+      .run(req.file.originalname, tipo.toUpperCase(), stats.insertedTrades, stats.insertedDivs, stats.skipped,
+           contas, contaNomes, stats.holdings, periodo.de, periodo.ate);
     res.json({
       ok: true, nTrades: stats.insertedTrades, nDividends: stats.insertedDivs,
       nDeposits: stats.insertedDeps, nHoldings: stats.holdings, nSkipped: stats.skipped,
-      convFailed, conta: contas, contaNome: contaNomes,
+      convFailed, conta: contas, contaNome: contaNomes, periodo,
     });
   } catch (e) {
     res.status(422).json({ error: e.message });

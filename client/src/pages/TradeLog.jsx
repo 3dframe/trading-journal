@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import axios from "axios";
 import Modal from "../components/Modal.jsx";
 import TradeDetail from "../components/TradeDetail.jsx";
+import CryptoDetail from "../components/CryptoDetail.jsx";
 
 const DEC = { minimumFractionDigits: 2, maximumFractionDigits: 2 };  // sempre 2 casas decimais
 const fmt = v => (v >= 0 ? "+" : "") + "€ " + Math.abs(v).toLocaleString("de-DE", DEC);
@@ -274,6 +275,7 @@ export default function TradeLog() {
   const [allTrades, setAllTrades]   = useState([]);
   const [allDivs, setAllDivs]       = useState([]);
   const [allDeps, setAllDeps]       = useState([]);
+  const [allHoldings, setAllHoldings] = useState([]);
   const [categoria, setCat]         = useState("");
   const [resultado, setRes]         = useState("");
   const [simbolo, setSim]           = useState("");
@@ -292,10 +294,12 @@ export default function TradeLog() {
       axios.get("/api/trades"),
       axios.get("/api/dividends"),
       axios.get("/api/import/deposits"),
-    ]).then(([tr, dv, dp]) => {
+      axios.get("/api/trades/holdings"),
+    ]).then(([tr, dv, dp, hd]) => {
       setAllTrades(tr.data);
       setAllDivs(dv.data);
       setAllDeps(dp.data);
+      setAllHoldings(hd.data);
     }).finally(() => setLoading(false));
   }, []);
 
@@ -371,11 +375,26 @@ export default function TradeLog() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allDeps, categoria, corretora, simbolo, resultado, range.from, range.to]);
 
+  // Posições de criptomoeda (holdings) — uma linha por ativo. São posições atuais (sem data
+  // de operação), por isso ignoram o filtro de período e de resultado (P/L não realizado).
+  const cryptoRows = useMemo(() => {
+    if (categoria && categoria !== "CRYPTO") return [];
+    if (resultado) return [];
+    let data = allHoldings.filter(h => h.categoria === "CRYPTO");
+    if (corretora) data = data.filter(h => h.corretora === corretora);
+    if (simbolo) {
+      const q = simbolo.toLowerCase();
+      data = data.filter(h => h.simbolo?.toLowerCase().includes(q) || h.nome?.toLowerCase().includes(q));
+    }
+    return data;
+  }, [allHoldings, categoria, corretora, simbolo, resultado]);
+
   // Merge e ordena por data descendente
   const rows = [
-    ...trades.map(t => ({ ...t, _type: "trade", _date: t.data_fecho })),
-    ...divs.map(d => ({ ...d, _type: "div",   _date: d.data_pagamento })),
-    ...deps.map(d => ({ ...d, _type: "dep",   _date: d.data })),
+    ...trades.map(t => ({ ...t, _type: "trade",  _date: t.data_fecho })),
+    ...divs.map(d => ({ ...d, _type: "div",    _date: d.data_pagamento })),
+    ...deps.map(d => ({ ...d, _type: "dep",    _date: d.data })),
+    ...cryptoRows.map(h => ({ ...h, _type: "crypto", _date: h.atualizado_em })),
   ].sort((a, b) => (b._date ?? "").localeCompare(a._date ?? ""));
 
   const tradeTotal = trades.reduce((s, t) => s + (t.pl_eur ?? 0), 0);
@@ -398,7 +417,9 @@ export default function TradeLog() {
 
   // Chave única por linha (para abrir o modal e delinear a linha clicada ao voltar).
   const keyOf = row => row._type === "trade" ? `t-${row.id}`
-    : row._type === "dep" ? `p-${row.id}` : `d-${row.simbolo}-${row.data_pagamento}`;
+    : row._type === "dep" ? `p-${row.id}`
+    : row._type === "crypto" ? `c-${row.simbolo}`
+    : `d-${row.simbolo}-${row.data_pagamento}`;
   const openRow  = row => { setSelKey(keyOf(row)); setModalRow(row); };
   const closeRow = () => {
     const k = selectedKey;
@@ -420,6 +441,7 @@ export default function TradeLog() {
             {trades.length} trades
             {divs.length > 0 ? ` · ${divs.length} dividendos/juros` : ""}
             {deps.length > 0 ? ` · ${deps.length} movimentos` : ""}
+            {cryptoRows.length > 0 ? ` · ${cryptoRows.length} cripto` : ""}
           </div>
         </div>
         {!loading && rows.length > 0 && (
@@ -475,6 +497,7 @@ export default function TradeLog() {
           <option value="STOCK">STOCK</option>
           <option value="CFD">CFD</option>
           <option value="OPTION">OPTION</option>
+          <option value="CRYPTO">CRIPTO</option>
           <option value="DIVIDENDO">DIVIDENDOS</option>
           <option value="JUROS">JUROS</option>
           <option value="MOVIMENTO">DEPÓSITOS / LEVANTAMENTOS</option>
@@ -488,6 +511,7 @@ export default function TradeLog() {
           <option value="">Todas as corretoras</option>
           <option value="XTB">XTB</option>
           <option value="IBKR">IBKR</option>
+          <option value="Bybit">Bybit</option>
         </select>
         <div style={{ position: "relative", marginLeft: "auto", width: 180 }}>
           <svg style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", opacity: 0.45 }}
@@ -553,10 +577,10 @@ export default function TradeLog() {
               <div className="log-row" data-row-key={key} style={{ gridTemplateColumns: LOG_COLS, outline: selectedKey === key ? "2px solid var(--accent)" : "none", outlineOffset: -2 }} onClick={() => openRow(row)}>
                 {/* Data */}
                 <span className="log-cell" style={{ color: LGRAY, fontSize: "0.75rem", textAlign: "center" }}>{t.data_fecho?.slice(0, 10)}</span>
-                {/* Empresa + TICKER */}
+                {/* TICKER + nome */}
                 <span className="log-cell" style={{ display: "flex", flexDirection: "column", lineHeight: 1.25, minWidth: 0 }}>
-                  <span style={{ color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.nome_instrumento}>{t.nome_instrumento || "—"}</span>
-                  <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#fbbf24" }}>{t.simbolo}</span>
+                  <span style={{ fontWeight: 700, color: "#fbbf24", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.simbolo || "—"}</span>
+                  <span style={{ fontSize: "0.72rem", color: LGRAY, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={t.nome_instrumento}>{t.nome_instrumento || "—"}</span>
                 </span>
                 {/* Corretora + conta */}
                 <ColBroker corretora={t.corretora} conta={t.conta} />
@@ -606,6 +630,37 @@ export default function TradeLog() {
           );
         }
 
+        if (row._type === "crypto") {
+          const h = row;
+          const key = `c-${h.simbolo}`;
+          return (
+            <div key={key}>
+              <div className="log-row" data-row-key={key} style={{ gridTemplateColumns: LOG_COLS, outline: selectedKey === key ? "2px solid var(--accent)" : "none", outlineOffset: -2 }} onClick={() => openRow(row)}>
+                {/* Data (última atualização) */}
+                <span className="log-cell" style={{ color: LGRAY, fontSize: "0.75rem", textAlign: "center" }}>{h.atualizado_em?.slice(0, 10) || "—"}</span>
+                {/* TICKER + nome */}
+                <span className="log-cell" style={{ display: "flex", flexDirection: "column", lineHeight: 1.25, minWidth: 0 }}>
+                  <span style={{ fontWeight: 700, color: "#fbbf24", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.simbolo}</span>
+                  <span style={{ fontSize: "0.72rem", color: LGRAY, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={h.nome}>{h.nome || "—"}</span>
+                </span>
+                {/* Corretora + conta */}
+                <ColBroker corretora={h.corretora} conta={h.conta} />
+                {/* País */}
+                <span className="log-cell" style={{ color: LGRAY, textAlign: "center" }}>—</span>
+                {/* Categoria */}
+                <span className="log-cell" style={{ color: AMBER, fontWeight: 700, textAlign: "center" }}>CRIPTO</span>
+                {/* Valor de mercado */}
+                <span className="log-cell" style={{ textAlign: "right", fontWeight: 700, color: "var(--text)" }}>{h.valor_eur != null ? fmtE(h.valor_eur) : "—"}</span>
+                {/* Swap */}
+                <span className="log-cell" style={{ textAlign: "right", color: MUTE }}>—</span>
+                {/* Resultado */}
+                <span style={{ textAlign: "center" }}><ResultBadge label="Em carteira" color={AMBER} /></span>
+                <span style={{ color: MUTE, textAlign: "center" }}>›</span>
+              </div>
+            </div>
+          );
+        }
+
         // Dividendo / Juros
         const d = row;
         const key = `d-${d.simbolo}-${d.data_pagamento}`;
@@ -615,10 +670,10 @@ export default function TradeLog() {
             <div className="log-row" data-row-key={key} style={{ gridTemplateColumns: LOG_COLS, outline: selectedKey === key ? "2px solid var(--accent)" : "none", outlineOffset: -2 }} onClick={() => openRow(row)}>
               {/* Data */}
               <span className="log-cell" style={{ color: LGRAY, fontSize: "0.75rem", textAlign: "center" }}>{d.data_pagamento?.slice(0, 10)}</span>
-              {/* Empresa + TICKER */}
+              {/* TICKER + nome */}
               <span className="log-cell" style={{ display: "flex", flexDirection: "column", lineHeight: 1.25, minWidth: 0 }}>
-                <span style={{ color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={d.nome_instrumento}>{d.nome_instrumento || "—"}</span>
-                <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#fbbf24" }}>{d.simbolo}</span>
+                <span style={{ fontWeight: 700, color: "#fbbf24", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.simbolo || "—"}</span>
+                <span style={{ fontSize: "0.72rem", color: LGRAY, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={d.nome_instrumento}>{d.nome_instrumento || "—"}</span>
               </span>
               {/* Corretora + conta */}
               <ColBroker corretora={d.corretora} conta={d.conta} />
@@ -667,6 +722,12 @@ function ModalHeader({ row }) {
     categoria = row.tipo === "INTEREST" ? "Juros" : "Dividendo";
     eur  = row.valor_liq_eur ?? 0;
     data = row.data_pagamento?.slice(0, 10);
+  } else if (row._type === "crypto") {
+    nome = row.nome || row.simbolo;
+    sub  = row.simbolo;
+    categoria = "CRIPTO";
+    eur  = row.valor_eur ?? 0;
+    data = row.atualizado_em?.slice(0, 10);
   } else {
     nome = row.nome_instrumento || row.simbolo;
     sub  = row.simbolo;
@@ -674,20 +735,31 @@ function ModalHeader({ row }) {
     eur  = row.pl_eur ?? 0;
     data = row.data_fecho?.slice(0, 10);
   }
-  const naoEur = !isEur(row.moeda_original) && row.taxa_cambio && row.taxa_cambio !== 1;
+  const isCrypto = row._type === "crypto";
+  const hasTicker = row._type !== "dep";   // depósitos/levantamentos não têm ticker
+  const naoEur = !isCrypto && !isEur(row.moeda_original) && row.taxa_cambio && row.taxa_cambio !== 1;
   const orig   = naoEur ? toOrig(eur, row) : null;
-  const cor    = eur >= 0 ? GREEN : RED;  // cor do total conforme o resultado
+  const cor    = isCrypto ? "var(--text)" : (eur >= 0 ? GREEN : RED);  // cor do total
   // Efeito do câmbio = quanto a conversão reduziu/aumentou a MAGNITUDE do valor
   // (consistente em ganhos e perdas). Ex.: $31,36 → €27,36 = −€4,00 / −12,75%.
   const fxDiff = naoEur ? Math.abs(eur) - Math.abs(orig) : 0;
   const fxPct  = naoEur && orig ? (fxDiff / Math.abs(orig)) * 100 : 0;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-      {/* Esquerda: empresa + ticker + data */}
+      {/* Esquerda: ticker (em cima) + nome (em baixo) + data. Para depósitos não há ticker. */}
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontWeight: 800, fontSize: "1rem", color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nome}</div>
-        <div style={{ fontSize: "0.74rem", fontWeight: 700, color: "#fbbf24" }}>{sub}</div>
-        {data && <div style={{ fontSize: "0.7rem", color: LGRAY }}>{data}</div>}
+        {hasTicker ? (
+          <>
+            <div style={{ fontWeight: 800, fontSize: "1rem", color: "#fbbf24", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sub}</div>
+            <div style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={nome}>{nome}</div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontWeight: 800, fontSize: "1rem", color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nome}</div>
+            <div style={{ fontSize: "0.74rem", fontWeight: 700, color: "#fbbf24" }}>{sub}</div>
+          </>
+        )}
+        {data && <div style={{ fontSize: "0.7rem", color: LGRAY, marginTop: 1 }}>{data}</div>}
       </div>
       {/* Centro: categoria */}
       <div style={{ flex: 1, textAlign: "center" }}>
@@ -695,7 +767,7 @@ function ModalHeader({ row }) {
       </div>
       {/* Direita: Net P/L (original cinza claro / € branco) + diferença cambial */}
       <div style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-        <div style={{ fontSize: "0.58rem", color: LGRAY, textTransform: "uppercase", letterSpacing: ".06em" }}>Net P/L</div>
+        <div style={{ fontSize: "0.58rem", color: LGRAY, textTransform: "uppercase", letterSpacing: ".06em" }}>{isCrypto ? "Valor" : "Net P/L"}</div>
         <div style={{ fontWeight: 800, fontSize: "0.95rem" }}>
           {naoEur
             ? <><span style={{ fontWeight: 800, color: cor }}>{fmtNatSign(orig, row.moeda_original)}</span><span style={{ fontWeight: 400, color: cor }}> ● </span><span style={{ fontWeight: 400, color: cor }}>{fmtEsign(eur)}</span></>
@@ -713,7 +785,8 @@ function ModalHeader({ row }) {
 
 // Detalhe da operação dentro do modal (trade, movimento ou dividendo/juros).
 function RowDetail({ row }) {
-  if (row._type === "trade") return <TradeDetail t={row} />;
+  if (row._type === "trade")  return <TradeDetail t={row} />;
+  if (row._type === "crypto") return <CryptoDetail h={row} />;
 
   if (row._type === "dep") {
     const d = row;

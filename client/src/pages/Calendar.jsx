@@ -16,8 +16,13 @@ const MUT = "var(--mute)";
 
 const fmtPL  = v => (v >= 0 ? "+" : "−") + "€ " + Math.abs(v).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtPct = v => v.toFixed(0) + "%";
-// Encargos (comissão/swap/rollover): valor em € com sinal, ou "—" se nulo/zero.
-const fmtEnc = v => (v == null || v === 0) ? "—" : (v < 0 ? "-" : "") + "€ " + Math.abs(v).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// Valor SEM símbolo € (P&L bruto, encargos, câmbio): com sinal, ou "—" se nulo/zero.
+const fmtEnc = v => (v == null || v === 0) ? "—" : (v < 0 ? "-" : "") + Math.abs(v).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// Encargo cambial por trade: |P&L em €| − |P&L na moeda original| (mesma definição do
+// card "Impacto Cambial" do Dashboard). Só aplicável a trades em moeda ≠ EUR.
+const fxImpact = t => (t.moeda_original && t.moeda_original !== "EUR" && t.pl_orig != null && t.taxa_cambio)
+  ? Math.abs(t.pl_eur || 0) - Math.abs(t.pl_orig || 0)
+  : null;
 
 function isoWeek(year, month, day) {
   const d = new Date(Date.UTC(year, month - 1, day));
@@ -112,10 +117,13 @@ function TradesPanel({ title, trades, divs = [], expanded, onExpand, panelRef })
         <table className="data-table" style={{ marginBottom: divs.length > 0 ? 16 : 0 }}>
           <thead><tr>
             <th>Símbolo</th><th>Categoria</th><th>Corretora</th>
-            <th>Abertura</th><th>Fecho</th><th style={{ textAlign: "right" }}>P&amp;L €</th>
-            <th style={{ textAlign: "right" }}>Comissão €</th>
-            <th style={{ textAlign: "right" }}>Swap €</th>
-            <th style={{ textAlign: "right" }}>Rollover €</th>
+            <th>Abertura</th><th>Fecho</th>
+            <th style={{ textAlign: "right" }}>P&amp;L Bruto</th>
+            <th style={{ textAlign: "right" }}>Comissão</th>
+            <th style={{ textAlign: "right" }}>Swap</th>
+            <th style={{ textAlign: "right" }}>Rollover</th>
+            <th style={{ textAlign: "right" }}>Enc. Cambial</th>
+            <th style={{ textAlign: "right" }}>P&amp;L Líquido €</th>
           </tr></thead>
           <tbody>
             {trades.map(t => {
@@ -133,14 +141,16 @@ function TradesPanel({ title, trades, divs = [], expanded, onExpand, panelRef })
                     <td>{t.corretora}</td>
                     <td style={{ fontSize: 11 }}>{t.data_abertura?.slice(0,19)?.replace("T"," ")}</td>
                     <td style={{ fontSize: 11 }}>{t.data_fecho?.slice(0,19)?.replace("T"," ")}</td>
-                    <td style={{ textAlign: "right", fontWeight: 700, color: pl >= 0 ? G : R }}>{fmtPL(pl)}</td>
+                    <td style={{ textAlign: "right", fontWeight: 700, color: t.gross_pl == null ? MUT : (t.gross_pl >= 0 ? G : R) }}>{fmtEnc(t.gross_pl)}</td>
                     <td style={{ textAlign: "right", color: MUT, fontSize: 11 }}>{fmtEnc(t.fees)}</td>
                     <td style={{ textAlign: "right", color: MUT, fontSize: 11 }}>{fmtEnc(t.swap)}</td>
                     <td style={{ textAlign: "right", color: MUT, fontSize: 11 }}>{fmtEnc(t.rollover)}</td>
+                    <td style={{ textAlign: "right", color: MUT, fontSize: 11 }}>{fmtEnc(fxImpact(t))}</td>
+                    <td style={{ textAlign: "right", fontWeight: 700, color: pl >= 0 ? G : R }}>{fmtPL(pl)}</td>
                   </tr>
                   {isOpen && (
                     <tr>
-                      <td colSpan={9} style={{ padding: "0 0 12px", background: "rgba(255,255,255,0.02)" }}>
+                      <td colSpan={11} style={{ padding: "0 0 12px", background: "rgba(255,255,255,0.02)" }}>
                         <TradeDetail t={t} />
                       </td>
                     </tr>

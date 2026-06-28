@@ -4,6 +4,10 @@ import axios from "axios";
 const fmt = v => v == null ? "—"
   : (v >= 0 ? "+" : "") + "€ " + Math.abs(v).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// Data YYYY-MM-DD → DD/MM/YYYY; período "de – até".
+const fmtDay = s => s ? String(s).slice(0, 10).split("-").reverse().join("/") : "—";
+const fmtPeriodo = (de, ate) => (!de && !ate) ? "—" : (de === ate ? fmtDay(de) : `${fmtDay(de)} – ${fmtDay(ate)}`);
+
 const BROKERS = [
   {
     id: "xtb", label: "XTB", ext: ".xlsx", accept: ".xlsx",
@@ -103,11 +107,11 @@ function HistoryTable({ history }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
         <thead>
           <tr>
-            {["Corretora", "Conta", "Ficheiro", "Operações", "Dividendos", "Ignorados", "Data Importação"].map(h => (
+            {["Corretora", "Conta", "Ficheiro", "Operações", "Ignorados", "Período", "Data Importação"].map(h => (
               <th key={h}
                 title={h === "Ignorados" ? "Registos que já existiam na base de dados — ignorados nessa importação para evitar duplicados." : undefined}
                 style={{
-                  padding: "8px 12px", textAlign: h === "Operações" || h === "Dividendos" || h === "Ignorados" ? "center" : "left",
+                  padding: "8px 12px", textAlign: ["Operações", "Ignorados"].includes(h) ? "center" : "left",
                   background: "var(--hover)", color: "var(--muted)", fontWeight: 700,
                   fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: ".05em",
                   whiteSpace: "nowrap", borderBottom: "1px solid var(--border)",
@@ -135,12 +139,12 @@ function HistoryTable({ history }) {
               <td style={{ padding: "9px 12px", textAlign: "center", fontWeight: 700, color: "var(--text)" }}>
                 {h.n_trades > 0 ? h.n_trades : <span style={{ color: "var(--muted)" }}>—</span>}
               </td>
-              <td style={{ padding: "9px 12px", textAlign: "center", fontWeight: 700, color: "var(--text)" }}>
-                {h.n_dividends > 0 ? h.n_dividends : <span style={{ color: "var(--muted)" }}>—</span>}
-              </td>
               <td style={{ padding: "9px 12px", textAlign: "center",
                 color: h.n_skipped > 0 ? "#f59e0b" : "var(--muted)" }}>
                 {h.n_skipped > 0 ? h.n_skipped : "—"}
+              </td>
+              <td style={{ padding: "9px 12px", color: "var(--muted)", whiteSpace: "nowrap", fontSize: "0.74rem" }}>
+                {fmtPeriodo(h.periodo_de, h.periodo_ate)}
               </td>
               <td style={{ padding: "9px 12px", color: "var(--muted)", whiteSpace: "nowrap" }}>
                 {h.imported_at?.replace("T", " ").slice(0, 16)}
@@ -207,7 +211,7 @@ export default function Import() {
       form.append("file", file.f);
       form.append("tipo", file.tipo);
       const { data } = await axios.post("/api/import/confirm", form);
-      setStatus({ ok: true, nTrades: data.nTrades, nDividends: data.nDividends, nDeposits: data.nDeposits, nHoldings: data.nHoldings, nSkipped: data.nSkipped });
+      setStatus({ ok: true, nTrades: data.nTrades, nDividends: data.nDividends, nDeposits: data.nDeposits, nHoldings: data.nHoldings, nSkipped: data.nSkipped, periodo: data.periodo });
       setPreview(null);
       setFile(null);
       fetchHistory();
@@ -306,8 +310,13 @@ export default function Import() {
       {preview && (
         <div style={{ marginBottom: 8, display: "flex", flexDirection: "column", gap: 12 }}>
           <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 18px" }}>
-            <div style={{ fontWeight: 700, fontSize: "0.85rem", color: "var(--text)", marginBottom: 8 }}>
-              Resultado da análise
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+              <div style={{ fontWeight: 700, fontSize: "0.85rem", color: "var(--text)" }}>Resultado da análise</div>
+              {preview.periodo?.de && (
+                <span style={{ fontSize: "0.74rem", color: "var(--muted)" }}>
+                  · período do ficheiro: <strong style={{ color: "var(--text)" }}>{fmtPeriodo(preview.periodo.de, preview.periodo.ate)}</strong>
+                </span>
+              )}
             </div>
             <div style={{ display: "flex", gap: 20, fontSize: "0.82rem", color: "var(--muted)", flexWrap: "wrap" }}>
               <span>📈 <strong style={{ color: "var(--text)" }}>{preview.nTrades}</strong> operações</span>
@@ -471,7 +480,9 @@ export default function Import() {
         }}>
           <span style={{ fontSize: "1.3rem" }}>✅</span>
           <div>
-            <div style={{ fontWeight: 700, color: "#22c55e", fontSize: "0.88rem" }}>Importação concluída!</div>
+            <div style={{ fontWeight: 700, color: "#22c55e", fontSize: "0.88rem" }}>
+              Importação concluída!{status.periodo?.de ? ` · período ${fmtPeriodo(status.periodo.de, status.periodo.ate)}` : ""}
+            </div>
             <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginTop: 2 }}>
               {status.nTrades} operações{status.nDividends ? `, ${status.nDividends} dividendos` : ""}{status.nDeposits ? `, ${status.nDeposits} depósitos` : ""} importados.
               {status.nHoldings > 0 && ` ${status.nHoldings} posições em carteira atualizadas.`}

@@ -6,6 +6,7 @@ import {
 } from "recharts";
 import Modal from "../components/Modal.jsx";
 import TradeDetail from "../components/TradeDetail.jsx";
+import CryptoDetail from "../components/CryptoDetail.jsx";
 
 const fmt = v =>
   (v < 0 ? "-" : "") + "€ " +
@@ -429,7 +430,7 @@ export default function Dashboard({ user }) {
     loadHoldings(); // posições abertas (não dependem do ano)
   }, []);
 
-  // Recarrega as "Ações em Carteira" (posições abertas). Usado no arranque e após
+  // Recarrega os "Ativos em Carteira" (posições abertas). Usado no arranque e após
   // editar o valor justo manual de um símbolo.
   const loadHoldings = useCallback(() => {
     axios.get("/api/trades/holdings").then(r => setHoldings(r.data)).catch(() => {});
@@ -559,6 +560,12 @@ export default function Dashboard({ user }) {
       symDivs.length ? `${symDivs.length} dividendo${symDivs.length !== 1 ? "s" : ""}` : null,
     ].filter(Boolean).join(" · ");
     setModal({ title: `📌 ${simbolo} — Histórico`, trades, detailed: true, divs: symDivs.length > 0 ? symDivs : null, brokers: brokerTotals(trades), summary: { label: subLabel, value: plT + plD } });
+  };
+
+  // Cripto (e outras posições sem trades fechados): abre o detalhe da posição + histórico
+  // de movimentos em vez do histórico de trades (que não existe para holdings).
+  const openCryptoHolding = (h) => {
+    setModal({ title: `📌 ${h.nome || h.simbolo} — ${h.simbolo}`, crypto: h });
   };
 
   if (!anosReady || loading) return <DashboardSkeleton />;
@@ -1324,14 +1331,14 @@ export default function Dashboard({ user }) {
         </div>
       </div>
 
-      {/* ── Ações em Carteira (posições abertas) ── */}
+      {/* ── Ativos em Carteira (posições abertas: ações, cripto, etc.) ── */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-        <span style={{ fontSize: "1.05rem", fontWeight: 800, color: "var(--text)" }}>Ações em Carteira</span>
+        <span style={{ fontSize: "1.05rem", fontWeight: 800, color: "var(--text)" }}>Ativos em Carteira</span>
         <span style={{ background: "var(--hover)", color: MUTE, fontSize: "0.72rem", fontWeight: 700, borderRadius: 20, padding: "2px 10px" }}>{holdings.length}</span>
       </div>
       {holdings.length === 0 ? (
         <div style={{ color: MUTE, fontSize: "0.85rem", padding: "16px 0", lineHeight: 1.6 }}>
-          Sem posições abertas. Importa um <strong>Activity Statement do IBKR</strong> que inclua a secção <em>“Open Positions”</em> — as ações em carteira são atualizadas automaticamente a cada importação.
+          Sem posições abertas. Importa um <strong>Activity Statement do IBKR</strong> (secção <em>“Open Positions”</em>) ou um <strong>relatório Bybit</strong> (criptomoedas) — os ativos em carteira são atualizados automaticamente a cada importação.
         </div>
       ) : (() => {
         const COLS = "minmax(150px,1.6fr) 1fr 1.4fr 1.1fr 1.2fr 1fr 1fr";
@@ -1359,7 +1366,7 @@ export default function Dashboard({ user }) {
                   const editing = fvEdit?.simbolo === h.simbolo;
                   const stop = e => e.stopPropagation();
                   return (
-                    <div key={h.simbolo} className="card" onClick={() => openSymbolHistory(h.simbolo)}
+                    <div key={h.simbolo} className="card" onClick={() => h.categoria === "CRYPTO" ? openCryptoHolding(h) : openSymbolHistory(h.simbolo)}
                       style={{ display: "grid", gridTemplateColumns: COLS, gap: 12, alignItems: "center",
                         padding: "14px 16px", cursor: "pointer", transition: "border-color .15s" }}
                       onMouseEnter={e => e.currentTarget.style.borderColor = "var(--accent)"}
@@ -1475,6 +1482,7 @@ export default function Dashboard({ user }) {
       {/* ── Modal ── */}
       {modal && (
         <Modal title={modal.title} summary={modal.summary} brokers={modal.brokers} onClose={closeModal}>
+          {modal.crypto && <CryptoDetail h={modal.crypto} />}
           {modal.trades && !modal.detailed && (
             <table className="data-table">
               <thead><tr>

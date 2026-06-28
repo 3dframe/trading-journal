@@ -117,6 +117,10 @@ function initSchema(db) {
   try { db.exec("ALTER TABLE dividendos     ADD COLUMN conta_nome TEXT"); } catch {}
   try { db.exec("ALTER TABLE depositos      ADD COLUMN conta_nome TEXT"); } catch {}
   try { db.exec("ALTER TABLE import_history ADD COLUMN conta_nome TEXT"); } catch {}
+  // Nº de posições (holdings) importadas e período (datas) a que o ficheiro respeita.
+  try { db.exec("ALTER TABLE import_history ADD COLUMN n_holdings INTEGER DEFAULT 0"); } catch {}
+  try { db.exec("ALTER TABLE import_history ADD COLUMN periodo_de  TEXT"); } catch {}
+  try { db.exec("ALTER TABLE import_history ADD COLUMN periodo_ate TEXT"); } catch {}
 
   // Migration: restantes campos dos relatórios que não eram capturados (nome do
   // instrumento, produto/plataforma, origem de encerramento, taxas de conversão
@@ -161,6 +165,8 @@ function initSchema(db) {
   )`); } catch {}
   // País (ISO 2 letras, do ISIN) da posição — usado para mapear o ticker da Yahoo (bolsa).
   try { db.exec("ALTER TABLE posicoes ADD COLUMN pais TEXT"); } catch {}
+  // Detalhe linha-a-linha dos movimentos da posição (ex.: depósitos/levantamentos Bybit).
+  try { db.exec("ALTER TABLE posicoes ADD COLUMN movimentos TEXT"); } catch {}
   // ISIN completo (Security ID) — para pesquisa por ISIN no Registo de Operações.
   try { db.exec("ALTER TABLE trades     ADD COLUMN isin TEXT"); } catch {}
   try { db.exec("ALTER TABLE dividendos ADD COLUMN isin TEXT"); } catch {}

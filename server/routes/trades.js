@@ -3,6 +3,7 @@ const router = express.Router();
 const { getDb } = require("../db");
 const fx     = require("../fx");
 const quotes = require("../quotes");
+const { cryptoName } = require("../crypto-names");
 
 const yearParam = (v) => (v && /^\d{4}$/.test(String(v)) ? String(v) : null);
 
@@ -214,6 +215,9 @@ router.get("/holdings", async (req, res) => {
       LEFT JOIN fair_value      f ON f.simbolo = p.simbolo
       LEFT JOIN symbol_overrides o ON o.simbolo = p.simbolo
       ORDER BY ABS(COALESCE(p.valor_eur, 0)) DESC`).all();
+
+    // Nome amigável das criptos (o relatório Bybit só traz o ticker, ex.: BTC → Bitcoin).
+    rows.forEach(h => { if (h.categoria === "CRYPTO" && (!h.nome || h.nome === h.simbolo)) h.nome = cryptoName(h.simbolo); });
 
     // Cotações ao vivo (Yahoo) para os tickers mapeados.
     const tickerByRow = rows.map(yahooTicker);
