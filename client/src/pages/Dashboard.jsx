@@ -22,8 +22,8 @@ const fmtCur = (v, moeda) => {
   return sym + Number(v).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
-const GREEN = "#10b981", RED = "#f43f5e", BLUE = "#60a5fa",
-      PINK = "#f472b6", AMBER = "#fbbf24", PURPLE = "#a78bfa", TEAL = "#14b8a6", MUTE = "#6b7280";
+const GREEN = "#10b981", RED = "#f43f5e",
+      PINK = "#f472b6", MUTE = "#6b7280";
 
 // Clareia (p>0) ou escurece (p<0) uma cor hex — usado para gerar o degradê das fatias dos donuts.
 const shade = (hex, p) => {
@@ -107,33 +107,73 @@ function StatIconCard({ icon, value, label, color, colorBg, onClick }) {
   );
 }
 
-// Card de métrica (estilo dos cards antigos): ícone com fundo da cor do card, a borda
-// muda para essa cor ao passar o rato, e ícone "i" com tooltip que abre POR BAIXO (para
-// não ser cortado no topo da página).
+// Card de métrica "dark pastel": ícone à esquerda com brilho neon (sem caixa), título +
+// linha divisória + valor + percentagem centrados, glow suave no fundo e hover que eleva o
+// card. O "i" fica no canto inferior direito e o tooltip abre POR CIMA.
 function MetricCard({ icon, color, label, value, sub, subColor, info, onClick }) {
   const [iShow, setIShow] = useState(false);
+  const [hover, setHover] = useState(false);
   return (
     <div onClick={onClick} style={{
-      position: "relative", flex: "1 1 0", minWidth: 190,
-      background: "var(--card)", border: "1px solid var(--border)", borderRadius: 14,
-      padding: "16px 18px", display: "flex", alignItems: "center", gap: 14,
-      cursor: onClick ? "pointer" : "default", transition: "border-color .2s, transform .2s",
+      position: "relative", flex: "1 1 0", minWidth: 200,
+      background: `linear-gradient(160deg, ${color}1f 0%, transparent 55%), linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0) 32%), var(--card)`,
+      border: `1px solid ${color}26`, borderRadius: 18,
+      padding: "16px 20px 22px", display: "flex", alignItems: "center", gap: 18,
+      cursor: onClick ? "pointer" : "default",
+      boxShadow: "0 2px 8px rgba(0,0,0,0.22)",
+      transition: "transform .22s ease, box-shadow .22s ease, border-color .22s ease",
     }}
-      onMouseEnter={e => { e.currentTarget.style.borderColor = color; e.currentTarget.style.transform = "translateY(-2px)"; }}
-      onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.transform = "translateY(0)"; }}>
-      {/* Símbolo (ícone) com fundo da cor do card */}
-      <div style={{ width: 44, height: 44, borderRadius: 12, flexShrink: 0, background: `${color}26`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        {icon}
+      onMouseEnter={e => {
+        setHover(true);
+        e.currentTarget.style.transform = "translateY(-3px)";
+        e.currentTarget.style.boxShadow = `0 10px 26px rgba(0,0,0,0.42), 0 0 20px ${color}1a`;
+        e.currentTarget.style.borderColor = `${color}55`;
+      }}
+      onMouseLeave={e => {
+        setHover(false);
+        e.currentTarget.style.transform = "translateY(0)";
+        e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.22)";
+        e.currentTarget.style.borderColor = `${color}26`;
+      }}>
+
+      {/* Glow suave no fundo do card — ténue em repouso, acende no hover */}
+      <div aria-hidden="true" style={{
+        position: "absolute", bottom: 1, left: "50%", transform: "translateX(-50%)",
+        width: "58%", height: 26, borderRadius: "50%",
+        background: `radial-gradient(ellipse at center, ${color}40, transparent 70%)`,
+        filter: "blur(10px)", pointerEvents: "none",
+        opacity: hover ? 0.95 : 0.28, transition: "opacity .25s ease",
+      }} />
+
+      {/* Ícone à esquerda: limpo em repouso, neon no hover */}
+      <div style={{ position: "relative", flexShrink: 0, width: 52, height: 52, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div aria-hidden="true" style={{
+          position: "absolute", inset: -4, borderRadius: "50%", background: color,
+          filter: "blur(14px)", pointerEvents: "none",
+          opacity: hover ? 0.45 : 0, transition: "opacity .25s ease",
+        }} />
+        <span style={{
+          position: "relative", display: "inline-flex", transform: "scale(1.5)",
+          filter: hover
+            ? `drop-shadow(0 0 4px ${color}) drop-shadow(0 0 10px ${color}aa)`
+            : `drop-shadow(0 0 1.5px ${color}66)`,
+          transition: "filter .25s ease",
+        }}>
+          {icon}
+        </span>
       </div>
-      {/* Conteúdo */}
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: "0.68rem", color: MUTE, fontWeight: 500, paddingRight: 16 }}>{label}</div>
-        <div style={{ fontSize: "1.2rem", fontWeight: 800, color: "var(--text)", lineHeight: 1.15, letterSpacing: "-0.5px" }}>{value}</div>
-        {sub && <div style={{ fontSize: "0.68rem", color: subColor || GREEN, marginTop: 2, fontWeight: 600 }}>{sub}</div>}
+
+      {/* Texto centrado: título · divisória · valor · percentagem */}
+      <div style={{ flex: 1, minWidth: 0, textAlign: "center" }}>
+        <div style={{ fontSize: "0.78rem", color: "var(--text)", fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
+        <div style={{ height: 1, margin: "7px 0 9px", background: `linear-gradient(90deg, transparent, ${color}55, transparent)` }} />
+        <div style={{ fontSize: "1.4rem", fontWeight: 800, color: "var(--text)", lineHeight: 1.15, letterSpacing: "-0.5px" }}>{value}</div>
+        {sub && <div style={{ fontSize: "0.74rem", fontWeight: 700, color: subColor || MUTE, marginTop: 5 }}>{sub}</div>}
       </div>
-      {/* "i" com tooltip por baixo */}
+
+      {/* "i" alinhado ao fundo do card; tooltip abre por cima */}
       {info && (
-        <span style={{ position: "absolute", top: 11, right: 11 }}
+        <span style={{ position: "absolute", bottom: 8, right: 11 }}
           onMouseEnter={() => setIShow(true)} onMouseLeave={() => setIShow(false)}>
           <span style={{
             display: "inline-flex", alignItems: "center", justifyContent: "center",
@@ -142,7 +182,7 @@ function MetricCard({ icon, color, label, value, sub, subColor, info, onClick })
           }}>i</span>
           {iShow && (
             <div style={{
-              position: "absolute", top: "calc(100% + 7px)", right: 0, width: 220,
+              position: "absolute", bottom: "calc(100% + 7px)", right: 0, width: 220,
               background: "#1e1e2e", border: "1px solid rgba(255,255,255,0.14)",
               borderRadius: 8, padding: "8px 11px", fontSize: "0.68rem", color: "#c4c4d4",
               zIndex: 400, lineHeight: 1.5, boxShadow: "0 8px 22px rgba(0,0,0,0.5)",
@@ -277,12 +317,19 @@ function DashboardSkeleton() {
 }
 
 // SVG icons
-const IcoLine = c => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>;
-const IcoGrid = c => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>;
-const IcoPct  = c => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="9" r="3"/><circle cx="15" cy="15" r="3"/><line x1="6" y1="18" x2="18" y2="6"/></svg>;
-const IcoCoin = c => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 12h6M12 9v6"/></svg>;
 const IcoBar  = c => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg>;
-const IcoBank = c => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="21" x2="21" y2="21"/><line x1="3" y1="10" x2="21" y2="10"/><polyline points="5 6 12 3 19 6"/><line x1="4" y1="10" x2="4" y2="21"/><line x1="20" y1="10" x2="20" y2="21"/><line x1="9" y1="14" x2="9" y2="17"/><line x1="15" y1="14" x2="15" y2="17"/></svg>;
+
+// ── Cores pastel + ícones dos 5 cards de topo ──────────────────────────────
+const PAST_BLUE = "#7FB3FF", PAST_GREEN = "#86E0A8", PAST_TEAL = "#5FE0CE",
+      PAST_SLATE = "#AEB5C0", PAST_PURPLE = "#C9A3E6";
+// Atualização circular (refresh)
+const IcoRefresh  = c => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>;
+// Seta de crescimento (trending up)
+const IcoTrendUp  = c => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>;
+// Câmbio (setas opostas)
+const IcoExchange = c => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>;
+// Calendário / previsão
+const IcoCalendar = c => <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>;
 
 // Intervalos da curva de Total Acumulado (estilo corretora). A janela é ancorada à
 // data mais recente dos dados (não ao "hoje" real), para nunca mostrar um gráfico vazio
@@ -722,7 +769,7 @@ export default function Dashboard({ user }) {
       {/* ── 5 cards de topo (estilo dos cards antigos) ── */}
       <div style={{ display: "flex", gap: 12, marginBottom: 20, overflowX: "auto", paddingTop: 4, paddingBottom: 4 }}>
         <MetricCard
-          icon={IcoBar(BLUE)} color={BLUE}
+          icon={IcoRefresh(PAST_BLUE)} color={PAST_BLUE}
           label="Retornos Não Realizados"
           value={fmt(unrealTotal)}
           sub={unrealPct != null ? pctTxt(unrealPct) : "—"}
@@ -730,7 +777,7 @@ export default function Dashboard({ user }) {
           info="Ganhos ou perdas das posições que ainda não vendeste (em carteira)."
         />
         <MetricCard
-          icon={IcoLine(PINK)} color={PINK}
+          icon={IcoBar(PAST_GREEN)} color={PAST_GREEN}
           label="Retornos Realizados"
           value={fmt(realizedNet)}
           sub={realizedPct != null ? pctTxt(realizedPct) : "—"}
@@ -739,7 +786,7 @@ export default function Dashboard({ user }) {
           onClick={openAllTrades}
         />
         <MetricCard
-          icon={IcoCoin(GREEN)} color={GREEN}
+          icon={IcoTrendUp(PAST_TEAL)} color={PAST_TEAL}
           label="Dividendos"
           value={fmt(dividendsLiq)}
           sub={divPct != null ? pctTxt(divPct) : "—"}
@@ -748,7 +795,7 @@ export default function Dashboard({ user }) {
           onClick={openDivs}
         />
         <MetricCard
-          icon={IcoBank(AMBER)} color={AMBER}
+          icon={IcoExchange(PAST_SLATE)} color={PAST_SLATE}
           label="Impacto Cambial"
           value={currencyImpact != null ? fmt(currencyImpact) : "n/d"}
           sub={currencyPct != null ? pctTxt(currencyPct) : "n/d"}
@@ -756,7 +803,7 @@ export default function Dashboard({ user }) {
           info="Impacto das variações cambiais nos resultados realizados de ativos estrangeiros. Aparece após importar operações em moeda diferente do EUR."
         />
         <MetricCard
-          icon={IcoCoin(PURPLE)} color={PURPLE}
+          icon={IcoCalendar(PAST_PURPLE)} color={PAST_PURPLE}
           label="Dividendos Estimados"
           value="n/d"
           sub="próximos 12 meses"

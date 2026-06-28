@@ -16,6 +16,8 @@ const MUT = "var(--mute)";
 
 const fmtPL  = v => (v >= 0 ? "+" : "−") + "€ " + Math.abs(v).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtPct = v => v.toFixed(0) + "%";
+// Encargos (comissão/swap/rollover): valor em € com sinal, ou "—" se nulo/zero.
+const fmtEnc = v => (v == null || v === 0) ? "—" : (v < 0 ? "-" : "") + "€ " + Math.abs(v).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function isoWeek(year, month, day) {
   const d = new Date(Date.UTC(year, month - 1, day));
@@ -105,10 +107,15 @@ function TradesPanel({ title, trades, divs = [], expanded, onExpand, panelRef })
         {divs.length > 0   && ` · ${divs.length} dividendo${divs.length !== 1 ? "s" : ""}`}
       </div>
       {trades.length > 0 && (
+        <>
+        <div style={panelSubhead}>Trades</div>
         <table className="data-table" style={{ marginBottom: divs.length > 0 ? 16 : 0 }}>
           <thead><tr>
             <th>Símbolo</th><th>Categoria</th><th>Corretora</th>
             <th>Abertura</th><th>Fecho</th><th style={{ textAlign: "right" }}>P&amp;L €</th>
+            <th style={{ textAlign: "right" }}>Comissão €</th>
+            <th style={{ textAlign: "right" }}>Swap €</th>
+            <th style={{ textAlign: "right" }}>Rollover €</th>
           </tr></thead>
           <tbody>
             {trades.map(t => {
@@ -127,10 +134,13 @@ function TradesPanel({ title, trades, divs = [], expanded, onExpand, panelRef })
                     <td style={{ fontSize: 11 }}>{t.data_abertura?.slice(0,19)?.replace("T"," ")}</td>
                     <td style={{ fontSize: 11 }}>{t.data_fecho?.slice(0,19)?.replace("T"," ")}</td>
                     <td style={{ textAlign: "right", fontWeight: 700, color: pl >= 0 ? G : R }}>{fmtPL(pl)}</td>
+                    <td style={{ textAlign: "right", color: MUT, fontSize: 11 }}>{fmtEnc(t.fees)}</td>
+                    <td style={{ textAlign: "right", color: MUT, fontSize: 11 }}>{fmtEnc(t.swap)}</td>
+                    <td style={{ textAlign: "right", color: MUT, fontSize: 11 }}>{fmtEnc(t.rollover)}</td>
                   </tr>
                   {isOpen && (
                     <tr>
-                      <td colSpan={6} style={{ padding: "0 0 12px", background: "rgba(255,255,255,0.02)" }}>
+                      <td colSpan={9} style={{ padding: "0 0 12px", background: "rgba(255,255,255,0.02)" }}>
                         <TradeDetail t={t} />
                       </td>
                     </tr>
@@ -140,8 +150,11 @@ function TradesPanel({ title, trades, divs = [], expanded, onExpand, panelRef })
             })}
           </tbody>
         </table>
+        </>
       )}
       {divs.length > 0 && (
+        <>
+        <div style={panelSubhead}>Dividendos / Juros</div>
         <table className="data-table">
           <thead><tr>
             <th>Símbolo</th><th>Corretora</th><th>Conta</th><th>País Fonte</th>
@@ -168,6 +181,7 @@ function TradesPanel({ title, trades, divs = [], expanded, onExpand, panelRef })
             )}
           </tbody>
         </table>
+        </>
       )}
     </div>
   );
@@ -302,6 +316,12 @@ const navBtnStyle = {
   borderRadius: 6, width: 32, height: 32, cursor: "pointer",
   color: "var(--text)", fontSize: "1rem", display: "flex",
   alignItems: "center", justifyContent: "center", flexShrink: 0,
+};
+
+// Sub-etiqueta acima de cada tabela do painel (Trades / Dividendos / Juros)
+const panelSubhead = {
+  fontSize: "0.64rem", fontWeight: 700, color: MUT,
+  textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 7,
 };
 
 // ══════════════════════════════════════════════════════════════
